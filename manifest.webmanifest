@@ -1,0 +1,26 @@
+{
+  "name": "短答すきまトレーナー",
+  "short_name": "短答",
+  "description": "公認会計士短答式の一問一答。すきま時間用。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ECEEE7",
+  "theme_color": "#ECEEE7",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
