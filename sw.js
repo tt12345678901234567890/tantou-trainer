@@ -1,7 +1,7 @@
 /* 短答すきまトレーナー — オフライン用サービスワーカー
    電波の入らない電車内でも開けるように、アプリ本体を端末に取り置きます。
    教材（cards.json）はここでは扱いません。端末の中だけに保存されています。 */
-var CACHE = 'tantou-app-v2';
+var CACHE = 'tantou-app-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -15,11 +15,15 @@ var ASSETS = [
   './icon-kansa-180.png',
   './icon-kansa-192.png',
   './icon-kansa-512.png',
+  './icon-kigyo-180.png',
+  './icon-kigyo-192.png',
+  './icon-kigyo-512.png',
   './icon-zaimu-180.png',
   './icon-zaimu-192.png',
   './icon-zaimu-512.png',
   './manifest-kanri.webmanifest',
   './manifest-kansa.webmanifest',
+  './manifest-kigyo.webmanifest',
   './manifest-zaimu.webmanifest'
 ];
 

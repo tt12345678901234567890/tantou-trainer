@@ -178,7 +178,7 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 <script>
 (function(){
 "use strict";
-var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={};
+var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
 var KEY='trainer_state', DKEY='trainer_cards_v1', DVER='';
 var DEF={title:'すきまトレーナー',sub:'',ask:'公認会計士短答式の肢です。',
@@ -200,7 +200,7 @@ function initData(d){
   M = {}; for(var k in DEF) M[k]=DEF[k];
   for(var k2 in mt) M[k2]=mt[k2];
   if(!M.pools||!M.pools.length) M.pools=DEF.pools;
-  CARDS=d.cards; TOPICS=d.topics; CZ=M.cz||[]; MAXW=d.maxw||1; DVER=d.v||M.sig;
+  CARDS=d.cards; TOPICS=d.topics; CZ=M.cz||[]; MAXW=d.maxw||1; DVER=d.v||M.sig; SH=d.sh||{};
   KEY='trainer_state_'+M.sig;
   BYID={}; BYTP={}; TP={};
   CARDS.forEach(function(c){ BYID[c.i]=c; (BYTP[c.t]=BYTP[c.t]||[]).push(c); });
@@ -284,6 +284,31 @@ function lp(){ try{localStorage.setItem('trainer_probe','1'); if(localStorage.ge
 /* ============ 状態 ============ */
 var CYC=[5,7,10,14];
 var S=null, ses=null, view='home', tmp={}, saveT=null;
+/* 旧・科目別アプリの記録を取り込めるようにする（カード番号が数字のもの） */
+function migrateBackup(o){
+  if(!o||!o.L) return o;
+  var ks=Object.keys(o.L);
+  if(!ks.length||!/^\d+$/.test(ks[0])) return o;      /* すでに今の形式 */
+  var pad=function(k){ return 'K'+('0000'+k).slice(-4); };
+  var L={},N={},cs={},log={},moved=0;
+  ks.forEach(function(k){
+    var v=o.L[k]||{}, st=Math.min(v.st||0,3), miss=v.miss||0;
+    var n=miss+Math.max(st,1), ok=Math.max(0,n-miss);
+    L[pad(k)]={st:st, ng:(st>0?0:Math.min(miss,3)), n:n, ok:ok,
+               due:v.due||today(), last:v.last||today()};
+    moved++;
+  });
+  for(var a in (o.N||{})) N[pad(a)]=o.N[a];
+  for(var b in (o.cycSeen||{})) cs[pad(b)]=1;
+  for(var c in (o.log||{})){ var x=o.log[c]||{}; log[c]={n:x.n||0,ok:x.ok||0,s:x.sec||x.s||0}; }
+  var f=fresh();
+  f.L=L; f.N=N; f.cycSeen=cs; f.log=log;
+  f.cyc=o.cyc||7; f.cycStart=(o.cycStart!=null?o.cycStart:today());
+  f.rounds=o.rounds||0; f.rank=o.rank||'AB'; f.mix=o.mix||'freq';
+  f.rt=o.rt||'on'; f.examStr=o.examStr||null; f.pool='mon';
+  f._moved=moved;
+  return f;
+}
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
   cycStart:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,ver:1}; }
 S=fresh();
@@ -858,6 +883,9 @@ function monRate(){
 }
 function stage2(){
   if(S.pool!=='mon'||S.s2dis) return null;
+  var hasKako=false;
+  for(var i=0;i<CARDS.length;i++){ if(CARDS[i].k){ hasKako=true; break; } }
+  if(!hasKako) return null;
   var r=monRate(), dl=daysLeftExam();
   if(r>=0.7) return {r:r,why:'問題集の'+Math.round(r*100)+'%に手が付きました'};
   if(dl!==null&&dl<=30&&r>=0.35) return {r:r,why:'本試験まで'+dl+'日です'};
@@ -1026,6 +1054,35 @@ function vCard(){
     } else h+='<button style="opacity:.65"><b>論点解説</b> — この論点は準備していません</button>';
     h+='</div>';
 
+    /* 条文の趣旨（企業法など、条文単位の解説がある教材で出る） */
+    var shk=(c.sh||[]).filter(function(k){ return SH[k]; });
+    if(shk.length){
+      h+='<div class="disc">';
+      h+='<button data-sh2="1"><b>'+(tmp.sh2?'条文の趣旨を閉じる':'条文の趣旨を読む')+'</b> — '+
+         esc(shk.map(function(k){ return k.replace('|','　'); }).join('／'))+'</button>';
+      if(tmp.sh2){
+        shk.forEach(function(k){
+          var e=SH[k];
+          h+='<div class="body"><div class="core">'+esc(k.replace('|','　'))+'</div>';
+          var body=tmp.shfull?(e.t||e.e):(e.e||e.t);
+          sentences(body).map(function(x,i){ return {t:x,i:i}; });
+          paras(sentences(body).map(function(x,i){ return {t:x,i:i}; })).forEach(function(g){
+            h+='<p>'+g.map(function(o){ return esc(o.t); }).join('')+'</p>';
+          });
+          if(tmp.shfull&&e.sub){
+            h+='<h4>号ごとの内容</h4><ul>';
+            for(var kk in e.sub) h+='<li><b>'+esc(kk)+'</b>　'+esc(e.sub[kk])+'</li>';
+            h+='</ul>';
+          }
+          h+='<div class="mini"><button data-shfull="1">'+(tmp.shfull?'やさしく':'詳しく')+'</button>'+
+             '<button data-say="s">読み上げる</button></div>';
+          if(e.p) h+='<span class="src">テキスト p.'+e.p+(e.b?'（'+esc(e.b)+'）':'')+'</span>';
+          h+='</div>';
+        });
+      }
+      h+='</div>';
+    }
+
     /* Claudeに聞く */
     h+='<div class="disc">';
     if(tmp.ask){
@@ -1150,6 +1207,8 @@ function vDash(){
   } else if(tmp.imp){
     h+='<textarea id="im" placeholder="書き出した文字列をここに貼る"></textarea>'+
        '<div class="mini"><button data-imp="do">読み込む</button><button data-imp="close">やめる</button></div>';
+    h+='<div class="note">科目別に作っていた旧アプリのバックアップも、そのまま貼れば取り込めます（形式は自動で変換します）。'+
+       'いまの科目の記録は上書きされるので、必要なら先に書き出しておいてください。</div>';
   } else {
     h+='<div class="mini"><button data-exp="open">記録を書き出す</button>'+
        '<button data-imp="open">記録を読み込む</button>'+
@@ -1231,9 +1290,13 @@ document.addEventListener('click',function(e){
   if(d.next){ nextCard(); return; }
   if(d.guess){ markGuess(); return; }
   if(d.sh){ tmp.sh=!tmp.sh; render(); return; }
+  if(d.sh2){ tmp.sh2=!tmp.sh2; render(); return; }
+  if(d.shfull){ tmp.shfull=!tmp.shfull; render(); return; }
   if(d.say){
     var c=ses&&ses.queue[ses.i]; if(!c) return;
     if(d.say==='k'){ var t=TP[c.t]; speak(t.kk+' '+t.kw); return; }
+    if(d.say==='s'){ var ks=(c.sh||[]).filter(function(x){ return SH[x]; });
+      if(ks.length){ var e=SH[ks[0]]; speak(tmp.shfull?(e.t||e.e):(e.e||e.t)); } return; }
     speak(c.q+(ses.graded?('。'+explainText(c)):''));
     return;
   }
@@ -1264,9 +1327,13 @@ document.addEventListener('click',function(e){
   if(d.imp){
     if(d.imp==='open'){ tmp.imp=1; render(); return; }
     if(d.imp==='close'){ tmp.imp=0; render(); return; }
-    if(d.imp==='do'){ try{ var o=JSON.parse(document.getElementById('im').value);
-      if(!o.L) throw 0; S=o; var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
-      save(); tmp.imp=0; toast('読み込みました'); render(); }catch(e){ toast('読み込めませんでした'); } return; }
+    if(d.imp==='do'){ try{ var o=migrateBackup(JSON.parse(document.getElementById('im').value));
+      if(!o.L) throw 0;
+      var mv=o._moved; delete o._moved;
+      S=o; var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
+      S.ses=null; save(); tmp.imp=0;
+      toast(mv?('旧アプリの'+mv+'肢を取り込みました'):'読み込みました');
+      render(); }catch(e){ toast('読み込めませんでした'); } return; }
   }
   if(d.treset){ if(confirm('学習時間の記録だけを消します。解いた記録は残ります。よろしいですか？')){
       for(var lk in S.log) S.log[lk].s=0; if(ses) ses.sec=0; save(); toast('時間の記録を消しました'); render(); } return; }
@@ -1320,7 +1387,7 @@ function deepLink(){
 }
 function brand(sig){
   /* ホーム画面に追加したときのアイコンと名前を、科目に合わせる */
-  var map={'監査論':'kansa','財務理論':'zaimu','管理理論':'kanri'};
+  var map={'監査論':'kansa','財務理論':'zaimu','管理理論':'kanri','企業法':'kigyo'};
   var k=map[sig]; if(!k) return;
   try{
     var l=document.querySelector('link[rel="apple-touch-icon"]');
