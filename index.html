@@ -182,6 +182,17 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
+var APPVER='v8', APPDATE='2026-09-15';
+var CHANGES=[
+ ['v8','2026-09-15','アプリのバージョン表示と「最新に更新する」を追加。読み込み画面の太字が黒帯になる崩れを修正'],
+ ['v7','2026-09-14','企業法に対応（条文の趣旨を肢ごとに表示）。科目別だった旧アプリのバックアップを自動変換して取り込めるように'],
+ ['v6','2026-09-13','4科目を1つのアプリに統合。教材を科目ごとに分けて保存するようにし、別科目を読むと前の教材が消える不具合を修正'],
+ ['v5','2026-09-12','前日と同じ問題ばかり出る不具合を修正（復習と新規の割合を1日の予定に合わせた）'],
+ ['v4','2026-09-11','学習時間に、アプリを閉じている間の時間が加算される不具合を修正。「時間だけ消す」を追加'],
+ ['v3','2026-09-10','論点解説を段落に分け、肢に対応する箇所へ色を付けるように。1周日数を途中で変えても正しく日割りされるように修正'],
+ ['v2','2026-09-09','「よく出る論点だけ」を追加。捨ててよい肢の判定を精緻化。収録した本試験の回数を教材から読むように'],
+ ['v1','2026-09-08','初版（監査論）']
+];
 var KEY='trainer_state', DKEY='trainer_cards_v1', DVER='';
 var DEF={title:'すきまトレーナー',sub:'',ask:'公認会計士短答式の肢です。',
   pools:[{id:'mon',label:'問題集',sub:'',note:''},{id:'all',label:'全部',sub:'',note:''}],
@@ -1218,6 +1229,19 @@ function vDash(){
        '<button data-reset="1" style="color:var(--shu)">全部消す</button></div>';
     h+='<div class="note">「時間だけ消す」は学習時間の記録をゼロに戻します。解いた記録と進み具合はそのまま残ります。</div>';
   }
+  h+='<div class="lbl" style="margin-top:22px">アプリ</div>';
+  h+='<div class="note">バージョン <b style="color:var(--ink)">'+APPVER+'</b>（'+APPDATE+'）<br>'+
+     '更新したはずの内容が入っていないときは「最新に更新する」を押してください。'+
+     '取り置きを消して読み直します。学習記録と教材は消えません。</div>';
+  h+='<div class="mini"><button data-ver="log">'+(tmp.vlog?'更新履歴を閉じる':'更新履歴')+'</button>'+
+     '<button data-ver="up">最新に更新する</button></div>';
+  if(tmp.vlog){
+    h+='<div style="margin-top:8px">';
+    CHANGES.forEach(function(c){
+      h+='<div class="gl"><b>'+esc(c[0])+'　'+esc(c[1])+'</b>'+esc(c[2])+'</div>';
+    });
+    h+='</div>';
+  }
   h+='<div class="lbl" style="margin-top:20px">教材ファイル</div>';
   h+='<div class="note">収録 '+CARDS.length+'肢・'+TOPICS.length+'論点'+(DVER?'（'+esc(DVER)+'）':'')+'。'+
      '新しい教材ファイルを受け取ったら、ここから入れ替えてください。学習記録はそのまま残ります。</div>';
@@ -1336,6 +1360,23 @@ document.addEventListener('click',function(e){
       S.ses=null; save(); tmp.imp=0;
       toast(mv?('旧アプリの'+mv+'肢を取り込みました'):'読み込みました');
       render(); }catch(e){ toast('読み込めませんでした'); } return; }
+  }
+  if(d.ver){
+    if(d.ver==='log'){ tmp.vlog=!tmp.vlog; render(); return; }
+    if(d.ver==='up'){
+      toast('最新を取りに行きます');
+      var done=function(){ try{ location.reload(true); }catch(e){ location.reload(); } };
+      try{
+        var jobs=[];
+        if(window.caches&&caches.keys) jobs.push(caches.keys().then(function(ks){
+          return Promise.all(ks.map(function(k){ return caches.delete(k); })); }));
+        if(navigator.serviceWorker&&navigator.serviceWorker.getRegistrations)
+          jobs.push(navigator.serviceWorker.getRegistrations().then(function(rs){
+            return Promise.all(rs.map(function(r){ return r.unregister(); })); }));
+        if(jobs.length) Promise.all(jobs).then(done,done); else done();
+      }catch(e){ done(); }
+      return;
+    }
   }
   if(d.treset){ if(confirm('学習時間の記録だけを消します。解いた記録は残ります。よろしいですか？')){
       for(var lk in S.log) S.log[lk].s=0; if(ses) ses.sec=0; save(); toast('時間の記録を消しました'); render(); } return; }
