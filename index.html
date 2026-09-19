@@ -182,8 +182,10 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v8', APPDATE='2026-09-15';
+var APPVER='v10', APPDATE='2026-09-16';
 var CHANGES=[
+ ['v10','2026-09-16','企業法の解説を監査版に差し替え（決議の瑕疵・差止請求権・官報公告など5論点を修正）'],
+ ['v9','2026-09-15','全科目ページを追加（4科目の進捗・遅れ・勉強時間を一覧。Study Plus 用の書き出しつき）。教材ファイルの版も科目ごとに表示'],
  ['v8','2026-09-15','アプリのバージョン表示と「最新に更新する」を追加。読み込み画面の太字が黒帯になる崩れを修正'],
  ['v7','2026-09-14','企業法に対応（条文の趣旨を肢ごとに表示）。科目別だった旧アプリのバックアップを自動変換して取り込めるように'],
  ['v6','2026-09-13','4科目を1つのアプリに統合。教材を科目ごとに分けて保存するようにし、別科目を読むと前の教材が消える不具合を修正'],
@@ -216,6 +218,7 @@ function initData(d){
   CARDS=d.cards; TOPICS=d.topics; CZ=M.cz||[]; MAXW=d.maxw||1; DVER=d.v||M.sig; SH=d.sh||{};
   KEY='trainer_state_'+M.sig;
   BYID={}; BYTP={}; TP={};
+  saveSummary();
   CARDS.forEach(function(c){ BYID[c.i]=c; (BYTP[c.t]=BYTP[c.t]||[]).push(c); });
   TOPICS.forEach(function(t){ TP[t.c]=t; });
   return true;
@@ -276,6 +279,20 @@ function scanSubjects(){
       SUBDUE[sg]=n;
     },function(){ SUBDUE[sg]=0; });
   }));
+}
+function sumKey(sig){ return 'trainer_sum_'+sig; }
+function saveSummary(){
+  var h={m:[0,0,0],k:[0,0,0]}, idx={'Ａ':0,'Ｂ':1,'Ｃ':2};
+  CARDS.forEach(function(c){ var i=idx[c.r]; if(i===undefined) return; h[c.k?'k':'m'][i]++; });
+  try{ lset(sumKey(M.sig), JSON.stringify({title:M.title,n:CARDS.length,t:TOPICS.length,v:DVER,h:h})); }catch(e){}
+}
+function getSummary(sig){ try{ return JSON.parse(lget(sumKey(sig))||'null'); }catch(e){ return null; } }
+function poolRankTotal(sm,pool,rank){
+  if(!sm||!sm.h) return sm?sm.n:0;
+  var rows=[]; if(pool!=='kako') rows.push(sm.h.m); if(pool!=='mon') rows.push(sm.h.k);
+  var n=0; rows.forEach(function(r){
+    n += rank==='A'?r[0]:(rank==='AB'?r[0]+r[1]:r[0]+r[1]+r[2]); });
+  return n;
 }
 function addSubject(sig){
   var a=subjects(); if(a.indexOf(sig)<0){ a.push(sig); lset('trainer_subjects',JSON.stringify(a)); }
@@ -1250,9 +1267,146 @@ function vDash(){
   h+=nav('dash');
   return h;
 }
+/* ===== 全科目ダッシュボード ===== */
+var ALL=null;
+function loadAll(){
+  var a=subjects();
+  return Promise.all(a.map(function(sg){
+    return Store.get('trainer_state_'+sg).then(function(v){
+      var st={}; try{ st=JSON.parse(v||'{}'); }catch(e){}
+      return {sig:sg, sum:getSummary(sg), st:st};
+    },function(){ return {sig:sg, sum:getSummary(sg), st:{}}; });
+  })).then(function(rs){
+    /* いま開いている科目は、保存待ちの分があるので手元の記録をそのまま使う */
+    rs.forEach(function(r){ if(r.sig===M.sig) r.st=S; });
+    ALL=rs; return rs;
+  });
+}
+function subjStat(x){
+  var st=x.st||{}, sm=x.sum, t=today();
+  var rank=st.rank||'AB', pool=st.pool||'mon';
+  var total=sm?poolRankTotal(sm,pool,rank):0;
+  var L=st.L||{}, started=0, n=0, ok=0;
+  for(var k in L){ started++; n+=L[k].n||0; ok+=L[k].ok||0; }
+  var seen=0, cs=st.cycSeen||{};
+  for(var k2 in cs) seen++;
+  var cyc=st.cyc||7;
+  var dayIn=(st.cycStart!=null)?Math.max(1,t-st.cycStart+1):0;
+  var prog=total?Math.min(1,seen/total):0;
+  var lag=(dayIn&&cyc)?(dayIn-cyc*prog):null;
+  var day=0,wk=0,tot=0,days=0,last=null;
+  for(var d in (st.log||{})){
+    var g=st.log[d]||{}, sec=g.s||0;
+    tot+=sec; if(sec)days++;
+    if(+d===t) day+=sec;
+    if(t-d<7) wk+=sec;
+    if(sec&&(last===null||+d>last)) last=+d;
+  }
+  var dl=null;
+  if(st.examStr){ var dd=new Date(st.examStr+'T00:00:00');
+    if(!isNaN(dd)) dl=Math.floor(dd.getTime()/864e5)-t; }
+  return {sig:x.sig, title:(sm&&sm.title)||x.sig, ver:sm&&sm.v, cards:sm?sm.n:0,
+    topics:sm?sm.t:0, total:total, started:started, seen:seen, prog:prog,
+    cyc:cyc, dayIn:dayIn, lag:lag, rate:n?ok/n:null, due:SUBDUE[x.sig]||0,
+    day:day, wk:wk, tot:tot, days:days, last:last, dl:dl,
+    rounds:st.rounds||0, rank:rank, noData:!sm};
+}
+function dayLabel(d){
+  var dt=new Date(d*864e5);
+  return (dt.getMonth()+1)+'/'+dt.getDate()+'（'+'日月火水木金土'[dt.getDay()]+'）';
+}
+function timeText(days){
+  var t=today(), lines=[], S2=(ALL||[]).map(subjStat);
+  for(var i=days-1;i>=0;i--){
+    var d=t-i, parts=[], sum=0;
+    (ALL||[]).forEach(function(x){
+      var g=(x.st&&x.st.log&&x.st.log[d])||null, sec=g?(g.s||0):0;
+      if(sec){ parts.push(((x.sum&&x.sum.title)||x.sig).replace(' すきまトレーナー','')+' '+Math.round(sec/60)+'分'); sum+=sec; }
+    });
+    if(sum) lines.push(dayLabel(d)+'  合計'+Math.round(sum/60)+'分　'+parts.join(' / '));
+  }
+  return lines.length?lines.join('\n'):'まだ記録がありません。';
+}
+function vAll(){
+  var h='<div class="hd"><h1 class="ttl">全科目</h1><button class="sub" data-go="home" style="font-size:12px">戻る</button></div><div class="rule"></div>';
+  if(!ALL){ loadAll().then(render); return h+'<div class="lead">集計しています…</div>'; }
+  if(!ALL.length) return h+'<div class="lead">まだ科目が入っていません。記録タブの「教材の追加・入れ替え」から読み込んでください。</div>'+nav('all');
+  var S2=ALL.map(subjStat);
+  var withLag=S2.filter(function(x){ return x.lag!==null&&x.total; });
+  withLag.sort(function(a,b){ return b.lag-a.lag; });
+  var order=withLag.concat(S2.filter(function(x){ return withLag.indexOf(x)<0; }));
+
+  /* いちばん遅れている科目を名指しする */
+  var top=withLag[0];
+  if(top&&top.lag>=0.5){
+    h+='<div class="pace warn"><b style="font-weight:600">いまは'+esc(top.title.replace(' すきまトレーナー',''))+'から</b><br>'+
+       '予定より<em>'+top.lag.toFixed(1)+'日分</em>おくれています。'+
+       (top.due?'戻ってきた肢も'+top.due+'肢たまっています。':'')+
+       '</div>';
+  } else if(top){
+    h+='<div class="pace"><b style="font-weight:600">4科目とも予定どおりです</b><br>'+
+       'いちばん進みが遅いのは'+esc(top.title.replace(' すきまトレーナー',''))+'ですが、遅れは'+Math.max(0,top.lag).toFixed(1)+'日分です。</div>';
+  }
+
+  h+='<div class="lbl" style="margin-top:18px">進捗（遅れている順）</div>';
+  order.forEach(function(x){
+    var nm=esc(x.title.replace(' すきまトレーナー',''));
+    var pct=Math.round(x.prog*100);
+    var lag=x.lag===null?null:x.lag;
+    var tag=lag===null?'<span class="sute">未着手</span>'
+      :(lag>=1?'<span class="hot">'+lag.toFixed(1)+'日おくれ</span>'
+      :(lag<=-1?'<span class="rk Ｂ">'+(-lag).toFixed(1)+'日ぶん先行</span>':'<span class="rk Ｂ">予定どおり</span>'));
+    h+='<button class="mode" data-subj2="'+esc(x.sig)+'" style="padding:13px">';
+    h+='<div class="tag" style="margin-bottom:7px"><b style="font-size:15px">'+nm+'</b>'+tag+
+       (x.due?'<span class="again">復習'+x.due+'</span>':'')+'</div>';
+    h+='<div class="row" style="padding:2px 0"><span class="bar" style="flex:1"><i style="width:'+pct+'%"></i></span>'+
+       '<span class="num">'+x.seen+' / '+x.total+'肢（'+pct+'%）</span></div>';
+    h+='<span style="font-size:11.5px;color:var(--sub);display:block;margin-top:6px;line-height:1.6">'+
+       (x.rounds?x.rounds+'周完了・':'')+(x.dayIn?x.cyc+'日で1周の'+x.dayIn+'日目':'周回の記録なし')+
+       '　／　正答率'+(x.rate===null?'—':Math.round(x.rate*100)+'%')+
+       '　／　直近7日 '+fmt(x.wk)+
+       (x.dl!==null?'　／　本試験まで'+x.dl+'日':'')+
+       (x.last!==null?'<br>最後に解いたのは '+dayLabel(x.last):'')+
+       (x.ver?'<br>教材 '+esc(x.ver):'')+
+       '</span>';
+    h+='</button>';
+  });
+
+  /* ---- 勉強時間 ---- */
+  var t=today(), dayAll=0, wkAll=0, totAll=0;
+  S2.forEach(function(x){ dayAll+=x.day; wkAll+=x.wk; totAll+=x.tot; });
+  h+='<div class="lbl" style="margin-top:22px">勉強時間</div>';
+  h+='<div class="time"><div><b>'+fmt(dayAll)+'</b><span>今日</span></div>'+
+     '<div><b>'+fmt(wkAll)+'</b><span>直近7日</span></div>'+
+     '<div><b>'+fmt(totAll)+'</b><span>累計</span></div></div>';
+  h+='<div style="margin-top:10px">';
+  S2.forEach(function(x){
+    if(!x.day&&!x.wk) return;
+    h+='<div class="row" style="border-bottom:1px solid var(--line)">'+
+       '<span class="nm">'+esc(x.title.replace(' すきまトレーナー',''))+'</span>'+
+       '<span class="num">今日 '+fmt(x.day)+'</span>'+
+       '<span class="num" style="flex:0 0 78px;text-align:right">7日 '+fmt(x.wk)+'</span></div>';
+  });
+  h+='</div>';
+  if(tmp.tcopy){
+    h+='<textarea id="tc" readonly style="min-height:130px">'+esc(timeText(7))+'</textarea>'+
+       '<div class="mini"><button data-tc="copy">コピー</button><button data-tc="close">閉じる</button></div>'+
+       '<div class="note">Study Plus などに記録するとき用です。日ごとの科目別内訳が入っています。</div>';
+  } else {
+    h+='<div class="mini"><button data-tc="open">記録用に書き出す</button></div>';
+  }
+
+  h+='<div class="caution" style="margin-top:16px"><b>遅れの見かた。</b>'+
+     '「1周する日数」に対して、いま何日目で何％進んでいるかを比べています。'+
+     '10日で1周の設定で5日目なら50%が予定どおり。30%しか進んでいなければ2日分のおくれです。'+
+     '科目ごとに周期を変えていても比べられます。</div>';
+  h+=nav('all');
+  return h;
+}
 function nav(cur){
   return '<div class="nav">'+
     '<button data-go="home" class="'+(cur==='home'?'on':'')+'">ホーム</button>'+
+    '<button data-go="all" class="'+(cur==='all'?'on':'')+'">全科目</button>'+
     '<button data-go="weak" class="'+(cur==='weak'?'on':'')+'">弱点</button>'+
     '<button data-go="dash" class="'+(cur==='dash'?'on':'')+'">記録</button></div>';
 }
@@ -1265,6 +1419,7 @@ function render(){
   else if(view==='finish'&&ses) h=vFinish();
   else if(view==='pick') h=vPick();
   else if(view==='cz') h=vCz();
+  else if(view==='all') h=vAll();
   else if(view==='weak') h=vWeak();
   else if(view==='dash') h=vDash();
   else h=vHome();
@@ -1284,6 +1439,7 @@ document.addEventListener('click',function(e){
     if(d.go==='home'){ stopSpeak(); view='home'; ses=ses&&view==='card'?ses:ses; render(); return; }
     if(d.go==='pick'){ view='pick'; render(); return; }
     if(d.go==='czhome'){ view='cz'; render(); return; }
+    if(d.go==='all'){ ALL=null; view='all'; tmp={}; scanSubjects().then(loadAll).then(render); return; }
     if(d.go==='weak'){ view='weak'; render(); return; }
     if(d.go==='dash'){ view='dash'; render(); return; }
     if(d.go==='resume'){ resumeSession(); return; }
@@ -1299,6 +1455,13 @@ document.addEventListener('click',function(e){
         CARDS=[]; TOPICS=[]; M={}; view='load'; render();
       }).then(scanSubjects).then(render);
     } return; }
+  if(d.subj2){ ALL=null; if(d.subj2!==M.sig){ switchTo(d.subj2).then(scanSubjects).then(render); } else { view='home'; render(); } return; }
+  if(d.tc){
+    if(d.tc==='open'){ tmp.tcopy=1; render(); return; }
+    if(d.tc==='close'){ tmp.tcopy=0; render(); return; }
+    if(d.tc==='copy'){ var x=document.getElementById('tc'); x.select();
+      try{ document.execCommand('copy'); toast('コピーしました'); }catch(e){ toast('長押しでコピーしてください'); } return; }
+  }
   if(d.topic){ startSession('topic',d.topic); return; }
   if(d.cz){ startSession('cz',d.cz); return; }
   if(d.psort){ tmp.psort=d.psort; render(); return; }
