@@ -182,8 +182,10 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v10', APPDATE='2026-09-16';
+var APPVER='v12', APPDATE='2026-09-20';
 var CHANGES=[
+ ['v12','2026-09-20','「全科目」を画面上段のタブに移動し、並びを 全科目・管理・企業・財理・監査 に固定'],
+ ['v11','2026-09-20','全科目ページで、一度も開き直していない科目の総肢数が0になり、遅れの順番から外れる不具合を修正'],
  ['v10','2026-09-16','企業法の解説を監査版に差し替え（決議の瑕疵・差止請求権・官報公告など5論点を修正）'],
  ['v9','2026-09-15','全科目ページを追加（4科目の進捗・遅れ・勉強時間を一覧。Study Plus 用の書き出しつき）。教材ファイルの版も科目ごとに表示'],
  ['v8','2026-09-15','アプリのバージョン表示と「最新に更新する」を追加。読み込み画面の太字が黒帯になる崩れを修正'],
@@ -293,6 +295,23 @@ function poolRankTotal(sm,pool,rank){
   var n=0; rows.forEach(function(r){
     n += rank==='A'?r[0]:(rank==='AB'?r[0]+r[1]:r[0]+r[1]+r[2]); });
   return n;
+}
+/* 要約（総肢数の内訳）は科目を開いたときに作られる。
+   無い科目は、しまってある教材から一度だけ作り直す。 */
+function ensureSummary(sig){
+  var sm=getSummary(sig);
+  if(sm&&sm.h) return Promise.resolve(sm);
+  return Cards.get(sig).then(function(txt){
+    if(!txt) return null;
+    try{
+      var d=JSON.parse(txt), h={m:[0,0,0],k:[0,0,0]}, idx={'Ａ':0,'Ｂ':1,'Ｃ':2};
+      (d.cards||[]).forEach(function(c){ var i=idx[c.r]; if(i===undefined) return; h[c.k?'k':'m'][i]++; });
+      var o={title:(d.meta&&d.meta.title)||sig, n:(d.cards||[]).length,
+             t:(d.topics||[]).length, v:d.v||'', h:h};
+      try{ lset(sumKey(sig), JSON.stringify(o)); }catch(e){}
+      return o;
+    }catch(e){ return null; }
+  },function(){ return null; });
 }
 function addSubject(sig){
   var a=subjects(); if(a.indexOf(sig)<0){ a.push(sig); lset('trainer_subjects',JSON.stringify(a)); }
@@ -800,7 +819,7 @@ function acceptFile(file){
 function vHome(){
   var d=dueList().length, np=newPool().length;
   var cs=stairCounts(), nm=STEPNM();
-  var h=subjBar();
+  var h=subjBar('home');
   h+='<div class="hd"><div><h1 class="ttl">'+esc(M.title)+'</h1>'+
     '<div class="sub">'+(M.sub?esc(M.sub)+' ':'')+poolTotal()+'肢／全'+CARDS.length+'肢・'+TOPICS.length+'論点</div></div></div><div class="rule"></div>';
   h+='<div class="stair">';
@@ -921,14 +940,24 @@ function stage2(){
   if(dl!==null&&dl<=30&&r>=0.35) return {r:r,why:'本試験まで'+dl+'日です'};
   return null;
 }
-function subjBar(){
-  var a=subjects();
-  if(a.length<2) return '';
+var SUBORDER=['管理理論','企業法','財務理論','監査論'];
+var SHORT={'管理理論':'管理','企業法':'企業','財務理論':'財理','監査論':'監査'};
+function sortedSubjects(){
+  return subjects().slice().sort(function(a,b){
+    var x=SUBORDER.indexOf(a), y=SUBORDER.indexOf(b);
+    if(x<0) x=99; if(y<0) y=99;
+    return x-y || (a<b?-1:1);
+  });
+}
+function subjBar(cur){
+  var a=sortedSubjects();
+  if(!a.length) return '';
   var h='<div class="subj">';
+  h+='<button data-go="all" class="'+(cur==='all'?'on':'')+'">全科目</button>';
   a.forEach(function(sg){
     var n=SUBDUE[sg];
-    h+='<button data-subj="'+esc(sg)+'" class="'+(sg===M.sig?'on':'')+'">'+esc(sg)+
-       (n?'<i>'+n+'</i>':'')+'</button>';
+    h+='<button data-subj="'+esc(sg)+'" class="'+(cur!=='all'&&sg===M.sig?'on':'')+'">'+
+       esc(SHORT[sg]||sg)+(n?'<i>'+n+'</i>':'')+'</button>';
   });
   h+='</div>';
   return h;
@@ -1272,10 +1301,12 @@ var ALL=null;
 function loadAll(){
   var a=subjects();
   return Promise.all(a.map(function(sg){
-    return Store.get('trainer_state_'+sg).then(function(v){
-      var st={}; try{ st=JSON.parse(v||'{}'); }catch(e){}
-      return {sig:sg, sum:getSummary(sg), st:st};
-    },function(){ return {sig:sg, sum:getSummary(sg), st:{}}; });
+    return ensureSummary(sg).then(function(sm){
+      return Store.get('trainer_state_'+sg).then(function(v){
+        var st={}; try{ st=JSON.parse(v||'{}'); }catch(e){}
+        return {sig:sg, sum:sm||getSummary(sg), st:st};
+      },function(){ return {sig:sg, sum:sm||getSummary(sg), st:{}}; });
+    });
   })).then(function(rs){
     /* いま開いている科目は、保存待ちの分があるので手元の記録をそのまま使う */
     rs.forEach(function(r){ if(r.sig===M.sig) r.st=S; });
@@ -1328,10 +1359,12 @@ function timeText(days){
   return lines.length?lines.join('\n'):'まだ記録がありません。';
 }
 function vAll(){
-  var h='<div class="hd"><h1 class="ttl">全科目</h1><button class="sub" data-go="home" style="font-size:12px">戻る</button></div><div class="rule"></div>';
+  var h=subjBar('all');
+  h+='<div class="hd"><h1 class="ttl">全科目</h1><button class="sub" data-go="home" style="font-size:12px">戻る</button></div><div class="rule"></div>';
   if(!ALL){ loadAll().then(render); return h+'<div class="lead">集計しています…</div>'; }
   if(!ALL.length) return h+'<div class="lead">まだ科目が入っていません。記録タブの「教材の追加・入れ替え」から読み込んでください。</div>'+nav('all');
   var S2=ALL.map(subjStat);
+  var unk=S2.filter(function(x){ return !x.total; });
   var withLag=S2.filter(function(x){ return x.lag!==null&&x.total; });
   withLag.sort(function(a,b){ return b.lag-a.lag; });
   var order=withLag.concat(S2.filter(function(x){ return withLag.indexOf(x)<0; }));
@@ -1352,15 +1385,16 @@ function vAll(){
   order.forEach(function(x){
     var nm=esc(x.title.replace(' すきまトレーナー',''));
     var pct=Math.round(x.prog*100);
-    var lag=x.lag===null?null:x.lag;
-    var tag=lag===null?'<span class="sute">未着手</span>'
+    var lag=(x.lag===null||!x.total)?null:x.lag;
+    var tag=!x.total?'<span class="sute">集計できません</span>'
+      :lag===null?'<span class="sute">未着手</span>'
       :(lag>=1?'<span class="hot">'+lag.toFixed(1)+'日おくれ</span>'
       :(lag<=-1?'<span class="rk Ｂ">'+(-lag).toFixed(1)+'日ぶん先行</span>':'<span class="rk Ｂ">予定どおり</span>'));
     h+='<button class="mode" data-subj2="'+esc(x.sig)+'" style="padding:13px">';
     h+='<div class="tag" style="margin-bottom:7px"><b style="font-size:15px">'+nm+'</b>'+tag+
        (x.due?'<span class="again">復習'+x.due+'</span>':'')+'</div>';
-    h+='<div class="row" style="padding:2px 0"><span class="bar" style="flex:1"><i style="width:'+pct+'%"></i></span>'+
-       '<span class="num">'+x.seen+' / '+x.total+'肢（'+pct+'%）</span></div>';
+    h+='<div class="row" style="padding:2px 0"><span class="bar" style="flex:1"><i style="width:'+(x.total?pct:0)+'%"></i></span>'+
+       '<span class="num">'+(x.total?(x.seen+' / '+x.total+'肢（'+pct+'%）'):(x.seen+'肢／総数不明'))+'</span></div>';
     h+='<span style="font-size:11.5px;color:var(--sub);display:block;margin-top:6px;line-height:1.6">'+
        (x.rounds?x.rounds+'周完了・':'')+(x.dayIn?x.cyc+'日で1周の'+x.dayIn+'日目':'周回の記録なし')+
        '　／　正答率'+(x.rate===null?'—':Math.round(x.rate*100)+'%')+
@@ -1396,6 +1430,10 @@ function vAll(){
     h+='<div class="mini"><button data-tc="open">記録用に書き出す</button></div>';
   }
 
+  if(unk.length)
+    h+='<div class="caution" style="margin-top:14px"><b>'+esc(unk.map(function(x){
+        return x.title.replace(' すきまトレーナー',''); }).join('・'))+'は総数が分かりません。</b>'+
+       'その科目を一度開けば集計できるようになります。上の一覧でタップしてください。</div>';
   h+='<div class="caution" style="margin-top:16px"><b>遅れの見かた。</b>'+
      '「1周する日数」に対して、いま何日目で何％進んでいるかを比べています。'+
      '10日で1周の設定で5日目なら50%が予定どおり。30%しか進んでいなければ2日分のおくれです。'+
@@ -1406,7 +1444,6 @@ function vAll(){
 function nav(cur){
   return '<div class="nav">'+
     '<button data-go="home" class="'+(cur==='home'?'on':'')+'">ホーム</button>'+
-    '<button data-go="all" class="'+(cur==='all'?'on':'')+'">全科目</button>'+
     '<button data-go="weak" class="'+(cur==='weak'?'on':'')+'">弱点</button>'+
     '<button data-go="dash" class="'+(cur==='dash'?'on':'')+'">記録</button></div>';
 }
