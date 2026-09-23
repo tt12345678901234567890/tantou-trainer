@@ -182,8 +182,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v12', APPDATE='2026-09-20';
+var APPVER='v13', APPDATE='2026-09-21';
 var CHANGES=[
+ ['v13','2026-09-21','遅れの判定を「その周で1肢でも解いてから」に変更。日数もcycの開始日ではなく解き始めた日から数えるようにし、1周を終えた直後に遅れ扱いされる不具合を修正'],
  ['v12','2026-09-20','「全科目」を画面上段のタブに移動し、並びを 全科目・管理・企業・財理・監査 に固定'],
  ['v11','2026-09-20','全科目ページで、一度も開き直していない科目の総肢数が0になり、遅れの順番から外れる不具合を修正'],
  ['v10','2026-09-16','企業法の解説を監査版に差し替え（決議の瑕疵・差止請求権・官報公告など5論点を修正）'],
@@ -359,7 +360,7 @@ function migrateBackup(o){
   return f;
 }
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
-  cycStart:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,ver:1}; }
+  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,ver:1}; }
 S=fresh();
 function today(){ var d=new Date(); d.setHours(0,0,0,0); return Math.floor(d.getTime()/864e5); }
 function cyc(){ return S.cyc||7; }
@@ -460,7 +461,10 @@ function doneToday(){ var l=S.log[today()]; return l?l.n:0; }
 function budget(){ return Math.max(0,cap()-doneToday()); }
 function markSeen(id){
   var c=cycState();
-  if(c.remain<=0&&c.dayIn>=cyc()){ S.rounds=(S.rounds||0)+1; S.cycStart=today(); S.cycSeen={}; }
+  if(c.remain<=0&&c.dayIn>=cyc()){
+    S.rounds=(S.rounds||0)+1; S.cycStart=today(); S.cycSeen={}; S.cycFirst=null;
+  }
+  if(!S.cycFirst) S.cycFirst=today();   /* 遅れは「解き始めた日」から数える */
   S.cycSeen[id]=1;
 }
 function examDay(){ if(!S.examStr) return null; var d=new Date(S.examStr+'T00:00:00'); if(isNaN(d)) return null;
@@ -1324,7 +1328,11 @@ function subjStat(x){
   var cyc=st.cyc||7;
   var dayIn=(st.cycStart!=null)?Math.max(1,t-st.cycStart+1):0;
   var prog=total?Math.min(1,seen/total):0;
-  var lag=(dayIn&&cyc)?(dayIn-cyc*prog):null;
+  /* この周でまだ1肢も解いていないうちは遅れを出さない。
+     解き始めていれば、その日を起点に数える（周が明けた直後に遅れ扱いされないように） */
+  var first=(st.cycFirst!=null)?st.cycFirst:st.cycStart;
+  var workDays=(seen&&first!=null)?Math.max(1,t-first+1):0;
+  var lag=(seen&&workDays&&cyc&&total)?(workDays-cyc*prog):null;
   var day=0,wk=0,tot=0,days=0,last=null;
   for(var d in (st.log||{})){
     var g=st.log[d]||{}, sec=g.s||0;
@@ -1338,7 +1346,7 @@ function subjStat(x){
     if(!isNaN(dd)) dl=Math.floor(dd.getTime()/864e5)-t; }
   return {sig:x.sig, title:(sm&&sm.title)||x.sig, ver:sm&&sm.v, cards:sm?sm.n:0,
     topics:sm?sm.t:0, total:total, started:started, seen:seen, prog:prog,
-    cyc:cyc, dayIn:dayIn, lag:lag, rate:n?ok/n:null, due:SUBDUE[x.sig]||0,
+    cyc:cyc, dayIn:dayIn, lag:lag, workDays:workDays, rate:n?ok/n:null, due:SUBDUE[x.sig]||0,
     day:day, wk:wk, tot:tot, days:days, last:last, dl:dl,
     rounds:st.rounds||0, rank:rank, noData:!sm};
 }
@@ -1387,7 +1395,7 @@ function vAll(){
     var pct=Math.round(x.prog*100);
     var lag=(x.lag===null||!x.total)?null:x.lag;
     var tag=!x.total?'<span class="sute">集計できません</span>'
-      :lag===null?'<span class="sute">未着手</span>'
+      :lag===null?(x.seen?'<span class="sute">未着手</span>':'<span class="sute">この周はこれから</span>')
       :(lag>=1?'<span class="hot">'+lag.toFixed(1)+'日おくれ</span>'
       :(lag<=-1?'<span class="rk Ｂ">'+(-lag).toFixed(1)+'日ぶん先行</span>':'<span class="rk Ｂ">予定どおり</span>'));
     h+='<button class="mode" data-subj2="'+esc(x.sig)+'" style="padding:13px">';
@@ -1396,7 +1404,9 @@ function vAll(){
     h+='<div class="row" style="padding:2px 0"><span class="bar" style="flex:1"><i style="width:'+(x.total?pct:0)+'%"></i></span>'+
        '<span class="num">'+(x.total?(x.seen+' / '+x.total+'肢（'+pct+'%）'):(x.seen+'肢／総数不明'))+'</span></div>';
     h+='<span style="font-size:11.5px;color:var(--sub);display:block;margin-top:6px;line-height:1.6">'+
-       (x.rounds?x.rounds+'周完了・':'')+(x.dayIn?x.cyc+'日で1周の'+x.dayIn+'日目':'周回の記録なし')+
+       (x.rounds?x.rounds+'周完了・':'')+
+       (x.dayIn?(x.cyc+'日で1周の'+x.dayIn+'日目'+
+         (x.seen&&x.workDays&&x.workDays<x.dayIn?'（解き始めて'+x.workDays+'日）':'')):'周回の記録なし')+
        '　／　正答率'+(x.rate===null?'—':Math.round(x.rate*100)+'%')+
        '　／　直近7日 '+fmt(x.wk)+
        (x.dl!==null?'　／　本試験まで'+x.dl+'日':'')+
