@@ -182,8 +182,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v13', APPDATE='2026-09-21';
+var APPVER='v14', APPDATE='2026-09-23';
 var CHANGES=[
+ ['v14','2026-09-23','端末をまたぐ引き継ぎ。4科目の記録をまとめて1つにコピーし、貼り付けるだけで移せるように（ユニバーサルクリップボード）。古い記録で上書きしそうなときは科目ごとに知らせて止める'],
  ['v13','2026-09-21','遅れの判定を「その周で1肢でも解いてから」に変更。日数もcycの開始日ではなく解き始めた日から数えるようにし、1周を終えた直後に遅れ扱いされる不具合を修正'],
  ['v12','2026-09-20','「全科目」を画面上段のタブに移動し、並びを 全科目・管理・企業・財理・監査 に固定'],
  ['v11','2026-09-20','全科目ページで、一度も開き直していない科目の総肢数が0になり、遅れの順番から外れる不具合を修正'],
@@ -335,6 +336,112 @@ function lp(){ try{localStorage.setItem('trainer_probe','1'); if(localStorage.ge
 var CYC=[5,7,10,14];
 var S=null, ses=null, view='home', tmp={}, saveT=null;
 /* 旧・科目別アプリの記録を取り込めるようにする（カード番号が数字のもの） */
+/* ---- 端末をまたぐ持ち出し（4科目まとめて1つ） ---- */
+function deviceName(){
+  try{
+    var u=navigator.userAgent||'';
+    if(/iPad/.test(u)) return 'iPad';
+    if(/iPhone/.test(u)) return 'iPhone';
+    if(/Android/.test(u)) return 'Android';
+    if(/Macintosh/.test(u)) return (navigator.maxTouchPoints>1?'iPad':'Mac');
+    return 'この端末';
+  }catch(e){ return 'この端末'; }
+}
+function stamp(){
+  var d=new Date(), z=function(n){ return (n<10?'0':'')+n; };
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes());
+}
+/* 科目の「進み具合」を1つの数にする。古いもので上書きしないための目印 */
+function activity(st){
+  st=st||{};
+  var n=0, ok=0, last=0, days=0;
+  for(var d in (st.log||{})){
+    var g=st.log[d]||{};
+    n+=g.n||0; ok+=g.ok||0;
+    if((g.n||0)&&+d>last) last=+d;
+    if(g.n||0) days++;
+  }
+  var cards=0; for(var k in (st.L||{})) cards++;
+  return {n:n, ok:ok, cards:cards, last:last, days:days};
+}
+function bundle(){
+  var subs={}, a=subjects();
+  return Promise.all(a.map(function(sg){
+    if(sg===M.sig){ subs[sg]=S; return Promise.resolve(); }
+    return Store.get('trainer_state_'+sg).then(function(v){
+      try{ if(v) subs[sg]=JSON.parse(v); }catch(e){}
+    },function(){});
+  })).then(function(){
+    return {tt:1, dev:deviceName(), at:stamp(), subjects:subs};
+  });
+}
+function packText(obj){
+  var txt=JSON.stringify(obj);
+  if(!(window.CompressionStream&&window.Response)) return Promise.resolve(txt);
+  try{
+    var cs=new CompressionStream('gzip');
+    var st=new Blob([txt]).stream().pipeThrough(cs);
+    return new Response(st).arrayBuffer().then(function(buf){
+      var b=new Uint8Array(buf), s2='';
+      for(var i=0;i<b.length;i++) s2+=String.fromCharCode(b[i]);
+      return 'TT1:'+btoa(s2);
+    },function(){ return txt; });
+  }catch(e){ return Promise.resolve(txt); }
+}
+function unpackText(txt){
+  txt=String(txt||'').trim();
+  if(txt.indexOf('TT1:')!==0) return Promise.resolve(JSON.parse(txt));
+  var raw=atob(txt.slice(4)), b=new Uint8Array(raw.length);
+  for(var i=0;i<raw.length;i++) b[i]=raw.charCodeAt(i);
+  var ds=new DecompressionStream('gzip');
+  var st=new Blob([b]).stream().pipeThrough(ds);
+  return new Response(st).text().then(function(t){ return JSON.parse(t); });
+}
+/* 取り込む前に、科目ごとに新旧を比べる */
+function compare(inc){
+  var out=[], a=Object.keys(inc.subjects||{});
+  return Promise.all(a.map(function(sg){
+    var got=function(mine){
+      var A=activity(inc.subjects[sg]), B=activity(mine);
+      var st = !mine ? 'new' : (A.n>B.n ? 'fwd' : (A.n<B.n ? 'back' : 'same'));
+      out.push({sig:sg, inc:A, mine:B, state:st});
+    };
+    if(sg===M.sig){ got(S); return Promise.resolve(); }
+    return Store.get('trainer_state_'+sg).then(function(v){
+      var m=null; try{ m=v?JSON.parse(v):null; }catch(e){}
+      got(m);
+    },function(){ got(null); });
+  })).then(function(){
+    out.sort(function(x,y){ return x.sig<y.sig?-1:1; });
+    return out;
+  });
+}
+function applyBundle(inc, only){
+  var a=Object.keys(inc.subjects||{}), jobs=[];
+  a.forEach(function(sg){
+    if(only && only.indexOf(sg)<0) return;
+    jobs.push(Store.set('trainer_state_'+sg, JSON.stringify(inc.subjects[sg])));
+  });
+  return Promise.all(jobs).then(function(){
+    /* いま開いている科目が入れ替わったら、手元にも反映する */
+    if((!only||only.indexOf(M.sig)>=0) && inc.subjects[M.sig]){
+      S=inc.subjects[M.sig];
+      var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
+      S.ses=null;
+    }
+  });
+}
+function imp1(raw){
+  try{
+    var o=migrateBackup(JSON.parse(raw));
+    if(!o.L) throw 0;
+    var mv=o._moved; delete o._moved;
+    S=o; var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
+    S.ses=null; save(); tmp.imp=0;
+    toast(mv?('旧アプリの'+mv+'肢を取り込みました'):'読み込みました');
+    render();
+  }catch(e){ toast('読み込めませんでした'); }
+}
 function migrateBackup(o){
   if(!o||!o.L) return o;
   var ks=Object.keys(o.L);
@@ -1263,19 +1370,50 @@ function vDash(){
     M.guide.forEach(function(g){ h+='<div class="gl"><b>'+esc(g.t)+'</b>'+esc(g.d)+'</div>'; });
   }
 
-  h+='<div class="lbl" style="margin-top:22px">記録の持ち出し</div>';
-  if(tmp.exp){
-    h+='<textarea id="ex" readonly>'+esc(JSON.stringify(S))+'</textarea>'+
+  h+='<div class="lbl" style="margin-top:22px">端末をまたいで引き継ぐ</div>';
+  if(tmp.cmp){
+    var inc=tmp.cmp.inc, rows=tmp.cmp.rows;
+    var back=rows.filter(function(r){ return r.state==='back'; });
+    var fwd=rows.filter(function(r){ return r.state==='fwd'||r.state==='new'; });
+    h+='<div class="pace"><b style="font-weight:600">'+esc(inc.dev||'ほかの端末')+'</b> の '+
+       esc(inc.at||'')+' 時点の記録です。</div>';
+    h+='<div style="margin-top:8px">';
+    rows.forEach(function(r){
+      var lab=r.state==='new'?'<span class="rk Ｂ">こちらに無い</span>'
+        :r.state==='fwd'?'<span class="rk Ｂ">進んでいる</span>'
+        :r.state==='back'?'<span class="hot">こちらのほうが新しい</span>'
+        :'<span class="sute">同じ</span>';
+      h+='<div class="gl"><b>'+esc(r.sig)+'　'+lab+'</b>'+
+         '受け取る側 '+r.inc.n+'肢'+(r.inc.last?'（'+dayLabel(r.inc.last)+'まで）':'')+
+         '　／　この端末 '+r.mine.n+'肢'+(r.mine.last?'（'+dayLabel(r.mine.last)+'まで）':'')+'</div>';
+    });
+    h+='</div>';
+    if(back.length)
+      h+='<div class="alert"><b>'+esc(back.map(function(r){return r.sig;}).join('・'))+
+         'は、この端末のほうが進んでいます</b>そのまま取り込むと'+
+         back.map(function(r){ return r.mine.n-r.inc.n; }).reduce(function(a,b){return a+b;},0)+
+         '肢ぶんの記録が消えます。下の「進んでいる科目だけ」を選べば、その科目はいまのまま残ります。</div>';
+    h+='<div class="mini">'+
+       (fwd.length?'<button data-cmp="safe" style="border-color:var(--ao);color:var(--ao)">進んでいる科目だけ取り込む（'+fwd.length+'科目）</button>':'')+
+       '<button data-cmp="all"'+(back.length?' style="color:var(--shu)"':'')+'>すべて上書き</button>'+
+       '<button data-cmp="close">やめる</button></div>';
+  } else if(tmp.exp){
+    h+='<textarea id="ex" readonly>'+esc(tmp.expText||'')+'</textarea>'+
        '<div class="mini"><button data-exp="copy">コピー</button><button data-exp="close">閉じる</button></div>';
+    h+='<div class="note">この文字列がすべてです。コピーしたら、もう片方の端末で「受け取る」に貼ってください。</div>';
   } else if(tmp.imp){
-    h+='<textarea id="im" placeholder="書き出した文字列をここに貼る"></textarea>'+
-       '<div class="mini"><button data-imp="do">読み込む</button><button data-imp="close">やめる</button></div>';
-    h+='<div class="note">科目別に作っていた旧アプリのバックアップも、そのまま貼れば取り込めます（形式は自動で変換します）。'+
-       'いまの科目の記録は上書きされるので、必要なら先に書き出しておいてください。</div>';
+    h+='<textarea id="im" placeholder="コピーした文字列をここに貼る"></textarea>'+
+       '<div class="mini"><button data-imp="do">内容を確かめる</button><button data-imp="close">やめる</button></div>';
+    h+='<div class="note">貼り付けたら、上書きする前に科目ごとの新旧を表示します。'+
+       '科目別に作っていた旧アプリのバックアップも、そのまま貼れば取り込めます。</div>';
   } else {
-    h+='<div class="mini"><button data-exp="open">記録を書き出す</button>'+
-       '<button data-imp="open">記録を読み込む</button>'+
-       '<button data-treset="1">時間だけ消す</button>'+
+    h+='<div class="mini"><button data-exp="copy2" style="border-color:var(--ao);color:var(--ao)">全科目をコピー</button>'+
+       '<button data-imp="open">受け取る</button>'+
+       '<button data-exp="open">文字列を表示</button></div>';
+    h+='<div class="note">4科目の記録をまとめて1つにします。同じApple IDのiPhoneとiPadなら、'+
+       'こちらで「全科目をコピー」を押し、向こうで「受け取る」を開いて貼り付けるだけで引き継げます'+
+       '（ユニバーサルクリップボード）。古い記録で上書きしそうなときは止めます。</div>';
+    h+='<div class="mini" style="margin-top:10px"><button data-treset="1">時間だけ消す</button>'+
        '<button data-reset="1" style="color:var(--shu)">全部消す</button></div>';
     h+='<div class="note">「時間だけ消す」は学習時間の記録をゼロに戻します。解いた記録と進み具合はそのまま残ります。</div>';
   }
@@ -1555,7 +1693,18 @@ document.addEventListener('click',function(e){
     if(d.ex==='clr'){ S.examStr=null; save(); render(); return; }
   }
   if(d.exp){
-    if(d.exp==='open'){ tmp.exp=1; render(); return; }
+    if(d.exp==='copy2'){
+      toast('まとめています…');
+      bundle().then(packText).then(function(txt){
+        var done=function(okc){ toast(okc?('コピーしました（'+Math.round(txt.length/1024)+'KB）'):'コピーできませんでした'); };
+        if(navigator.clipboard&&navigator.clipboard.writeText)
+          navigator.clipboard.writeText(txt).then(function(){ done(1); },function(){ tmp.exp=1; tmp.expText=txt; render(); });
+        else { tmp.exp=1; tmp.expText=txt; render(); }
+      });
+      return;
+    }
+    if(d.exp==='open'){ toast('まとめています…');
+      bundle().then(packText).then(function(txt){ tmp.expText=txt; tmp.exp=1; render(); }); return; }
     if(d.exp==='close'){ tmp.exp=0; render(); return; }
     if(d.exp==='copy'){ var x=document.getElementById('ex'); x.select();
       try{ document.execCommand('copy'); toast('コピーしました'); }catch(e){ toast('長押しでコピーしてください'); } return; }
@@ -1563,13 +1712,37 @@ document.addEventListener('click',function(e){
   if(d.imp){
     if(d.imp==='open'){ tmp.imp=1; render(); return; }
     if(d.imp==='close'){ tmp.imp=0; render(); return; }
-    if(d.imp==='do'){ try{ var o=migrateBackup(JSON.parse(document.getElementById('im').value));
+    if(d.imp==='do'){
+      var raw=document.getElementById('im').value;
+      unpackText(raw).then(function(o){
+        if(o&&o.tt&&o.subjects){                       /* 全科目まとめ */
+          compare(o).then(function(rows){ tmp.cmp={inc:o,rows:rows}; tmp.imp=0; render(); });
+          return;
+        }
+        throw 0;                                        /* 旧来の1科目ぶんは下へ */
+      }).then(null,function(){ imp1(raw); });
+      return; }
+    if(0){ try{ var o=migrateBackup(JSON.parse(document.getElementById('im').value));
       if(!o.L) throw 0;
       var mv=o._moved; delete o._moved;
       S=o; var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
       S.ses=null; save(); tmp.imp=0;
       toast(mv?('旧アプリの'+mv+'肢を取り込みました'):'読み込みました');
       render(); }catch(e){ toast('読み込めませんでした'); } return; }
+  }
+  if(d.cmp){
+    if(d.cmp==='close'){ tmp.cmp=null; render(); return; }
+    var inc=tmp.cmp.inc, rows=tmp.cmp.rows;
+    var only=(d.cmp==='safe')?rows.filter(function(r){ return r.state==='fwd'||r.state==='new'; })
+                                  .map(function(r){ return r.sig; }):null;
+    if(only&&!only.length){ toast('取り込む科目がありません'); return; }
+    applyBundle(inc, only).then(function(){
+      tmp.cmp=null; ALL=null;
+      var n=only?only.length:rows.length;
+      toast(n+'科目を取り込みました');
+      scanSubjects().then(render, render);
+    });
+    return;
   }
   if(d.ver){
     if(d.ver==='log'){ tmp.vlog=!tmp.vlog; render(); return; }
