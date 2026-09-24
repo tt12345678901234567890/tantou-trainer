@@ -182,8 +182,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v14', APPDATE='2026-09-23';
+var APPVER='v15', APPDATE='2026-09-24';
 var CHANGES=[
+ ['v15','2026-09-24','復習を周回から切り離した。「今日のぶん」は周回を進める肢だけになり、1周まわり切るとその場で次の周に入る。復習は「復習だけ」から別枠で回す'],
  ['v14','2026-09-23','端末をまたぐ引き継ぎ。4科目の記録をまとめて1つにコピーし、貼り付けるだけで移せるように（ユニバーサルクリップボード）。古い記録で上書きしそうなときは科目ごとに知らせて止める'],
  ['v13','2026-09-21','遅れの判定を「その周で1肢でも解いてから」に変更。日数もcycの開始日ではなく解き始めた日から数えるようにし、1周を終えた直後に遅れ扱いされる不具合を修正'],
  ['v12','2026-09-20','「全科目」を画面上段のタブに移動し、並びを 全科目・管理・企業・財理・監査 に固定'],
@@ -564,13 +565,9 @@ function setCycle(n){
   }
 }
 function repeatEst(){ var d=dueList().length; return Math.min(d,Math.round(cap()*0.45)); }
-function doneToday(){ var l=S.log[today()]; return l?l.n:0; }
+function doneToday(){ var l=S.log[today()]; return l?(l.nw||0):0; }
 function budget(){ return Math.max(0,cap()-doneToday()); }
 function markSeen(id){
-  var c=cycState();
-  if(c.remain<=0&&c.dayIn>=cyc()){
-    S.rounds=(S.rounds||0)+1; S.cycStart=today(); S.cycSeen={}; S.cycFirst=null;
-  }
   if(!S.cycFirst) S.cycFirst=today();   /* 遅れは「解き始めた日」から数える */
   S.cycSeen[id]=1;
 }
@@ -594,50 +591,36 @@ var MODES={
   weak:{nm:'弱点つぶし'}, cz:{nm:'直前チェック'}, note:{nm:'メモのある肢'}, must:{nm:'落とせない肢'}
 };
 function planLists(total,opt){
-  opt=opt||{}; var t=today(), due=[],neu=[],again=[];
+  opt=opt||{}; var t=today();
   var base=opt.pool||poolCards();
-  base.forEach(function(c){
-    var L=S.L[c.i];
-    if(L){ if(L.due<=t){ (L.ng?again:due).push(c); } }
-    else if(!S.cycSeen[c.i]) neu.push(c);
-  });
-  again.sort(function(a,b){ return (S.L[b.i].ng||0)-(S.L[a.i].ng||0); });
   var pick=function(a,n){ return n<=0?[]:(S.mix==='freq'?wpick(a,n):shuf(a).slice(0,n)); };
 
-  /* 復習と新規の割合は、その日の予定（1日◯肢＋戻ってきた◯肢）に合わせる。
-     短いセッションでも同じ割合になるので、「前日と同じ問題ばかり」にならない。 */
-  var revAvail=again.length+due.length, newAvail=neu.length, pRev;
-  if(!revAvail) pRev=0;
-  else if(!newAvail || opt.norev) pRev=1;
-  else {
-    var perDay=cap(), rep=Math.min(revAvail, Math.round(perDay*0.45));
-    pRev=rep/(rep+perDay);
-    if(pRev<0.20) pRev=0.20;
-    if(pRev>0.50) pRev=0.50;
+  /* 復習だけのモード。予定日が来た肢と、外したままの肢を出す */
+  if(opt.review){
+    var due=[],again=[];
+    base.forEach(function(c){
+      var L=S.L[c.i];
+      if(L&&L.due<=t){ (L.ng?again:due).push(c); }
+    });
+    again.sort(function(a,b){ return (S.L[b.i].ng||0)-(S.L[a.i].ng||0); });
+    var o=again.slice(0,Math.min(again.length,Math.ceil(total*0.6)));
+    o=o.concat(pick(due,total-o.length));
+    if(o.length<total) o=o.concat(again.slice(o.length));
+    return shuf(o).slice(0,total);
   }
-  var nRev=Math.min(revAvail, Math.round(total*pRev));
-  if(revAvail && nRev<1 && total>=3) nRev=1;          /* 少なくとも1肢は復習を混ぜる */
 
-  var out=[];
-  var nAgain=Math.min(again.length, Math.ceil(nRev*0.6));   /* 外した肢を先に */
-  out=out.concat(again.slice(0,nAgain));
-  out=out.concat(pick(due, Math.min(due.length, nRev-out.length)));
-  if(out.length<nRev) out=out.concat(again.slice(nAgain, nAgain+(nRev-out.length)));
-
-  var rest=total-out.length;
-  if(rest>0) out=out.concat(pick(neu,rest));
-
-  if(out.length<total){            /* 片方が尽きたらもう片方で埋める */
-    var used={}; out.forEach(function(c){ used[c.i]=1; });
-    var extra=again.concat(due).concat(neu).filter(function(c){ return !used[c.i]; });
-    out=out.concat(pick(extra,total-out.length));
+  /* 通常は周回を進める。この周でまだ出していない肢だけを出す */
+  var neu=base.filter(function(c){ return !S.cycSeen[c.i]; });
+  if(!neu.length){          /* 1周まわり切ったら、その場で次の周に入る */
+    nextRound();
+    neu=base.slice();
   }
-  if(out.length<total&&!opt.norev){
-    var used2={}; out.forEach(function(c){ used2[c.i]=1; });
-    var ex2=base.filter(function(c){ return !used2[c.i]; });
-    out=out.concat(pick(ex2,total-out.length));
-  }
-  return shuf(out).slice(0,total);
+  return shuf(pick(neu,total)).slice(0,total);
+}
+function nextRound(){
+  S.rounds=(S.rounds||0)+1;
+  S.cycStart=today(); S.cycFirst=null; S.cycSeen={};
+  save();
 }
 function planCounts(total,opt){
   var l=planLists(total,opt), t=today(), r={all:l.length,fresh:0,neu:0,again:0};
@@ -652,7 +635,7 @@ function startSession(mode,arg){
   else if(mode==='half') q=planLists(Math.max(1,Math.round(budget()*0.5)));
   else if(mode==='one') q=planLists(5);
   else if(mode==='more') q=planLists(Math.max(5,Math.round(cap()*0.5)));
-  else if(mode==='rev') q=planLists(Math.max(1,budget()),{norev:true});
+  else if(mode==='rev') q=planLists(Math.max(5,Math.min(dueList().length,cap())),{review:true});
   else if(mode==='topic') q=shuf(BYTP[arg]||[]).filter(poolOk).slice(0,30);
   else if(mode==='note'){ var ids=Object.keys(S.N||{}).filter(function(k){return S.N[k];});
     q=shuf(ids.map(function(i){return BYID[i];}).filter(Boolean)).slice(0,30); }
@@ -679,13 +662,16 @@ function isRetry(){ return ses&&ses.rstart!==undefined&&ses.i>=ses.rstart; }
 
 function grade(id,good){
   var t=today(), L=S.L[id]||{st:0,ng:0,n:0,ok:0};
+  var fresh_=!S.cycSeen[id];
   L.n=(L.n||0)+1;
   if(good){ L.ok=(L.ok||0)+1; L.st=Math.min((L.st||0)+1,3); L.ng=0; }
   else { L.ng=(L.ng||0)+1; L.st=0; }
   var st=STEPS();
   L.due=t+(L.st===0?1:st[Math.min(L.st,3)-1]);
   L.last=t; S.L[id]=L; markSeen(id);
-  var lg=S.log[t]||{n:0,ok:0,s:0}; lg.n++; if(good)lg.ok++; S.log[t]=lg;
+  var lg=S.log[t]||{n:0,ok:0,s:0,nw:0}; lg.n++; if(good)lg.ok++;
+  if(fresh_) lg.nw=(lg.nw||0)+1;      /* 周回を進めた肢だけ、今日の枠から引く */
+  S.log[t]=lg;
   save();
 }
 var TICKMAX=90;   /* 5秒ごとに数えているので、これを超える間隔は画面を離れていたとみなす */
@@ -937,9 +923,10 @@ function vHome(){
   for(var i=0;i<3;i++) h+='<div class="'+(cs[i]?'on':'')+'"><b>'+cs[i]+'</b><span>'+nm[i]+'</span></div>';
   h+='</div>';
   h+='<div class="lbl">今日の復習 '+d+'肢 ／ 未着手 '+np+'肢</div>';
-  if(d>Math.round(cap()*1.5)&&d>20)
+  if(d>20)
     h+='<div class="note" style="color:var(--hold)">戻ってきた肢が'+d+'肢たまっています。'+
-       '新規と混ぜて少しずつ消していますが、追いつかないときは下の「復習だけ」でまとめて片付けてください。</div>';
+       '周回のじゃまをしないよう、今日のぶんには混ぜていません。'+
+       '手が空いたときに「復習だけ」で崩してください。</div>';
   var T=timeStats();
   h+='<div class="time"><div><b>'+fmt(T.day)+'</b><span>今日</span></div>'+
      '<div><b>'+fmt(T.week)+'</b><span>直近7日</span></div>'+
@@ -1014,15 +1001,20 @@ function vHome(){
 
   h+='<div class="lbl" style="margin-top:20px">今日やる分</div>';
   var bd=budget();
-  function brk(p){ var a=[]; if(p.fresh)a.push('復習'+p.fresh); if(p.neu)a.push('新規'+p.neu);
-    if(p.again)a.push('戻ってきた'+p.again); return a.join(' ＋ '); }
+  function brk(p){
+    var a=[]; if(p.neu)a.push('新規'+p.neu);
+    if(p.fresh||p.again)a.push('2周目以降'+(p.fresh+p.again));
+    return a.join(' ＋ '); }
   var p1=planCounts(Math.max(1,bd));
-  h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+'分・論点をまたいで出します</span></button>';
+  h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+
+     '分・論点をまたいで出します。周回を進める肢だけで、復習は混ぜません</span></button>';
   var p2=planCounts(Math.max(1,Math.round(bd*0.5)));
   h+='<button class="mode" data-go="half"><b>半分だけ</b><span>'+p2.all+'肢・約'+mins(p2.all)+'分。時間がない日に</span></button>';
   h+='<button class="mode" data-go="one"><b>1分だけ</b><span>5肢。信号待ち・歯みがき・レンジの待ち時間に</span></button>';
-  var p3=planCounts(Math.max(1,bd),{norev:true});
-  h+='<button class="mode" data-go="rev"><b>復習だけ</b><span>新規を止めて、戻ってきた'+p3.all+'肢だけ</span></button>';
+  var dn=dueList().length;
+  h+='<button class="mode" data-go="rev"'+(dn?'':' style="opacity:.5"')+
+     '><b>復習だけ</b><span>'+(dn?('予定日が来た'+dn+'肢から。周回とは別枠なので、今日のぶんの量は減りません')
+       :'いまは戻ってきた肢がありません')+'</span></button>';
   var wc=weakCards().length;
   if(wc) h+='<button class="mode" data-go="weak"><b>弱点つぶし</b><span>外した回数×出題頻度で並べた上位20肢。伸びしろが大きい順</span></button>';
   var nn=0; for(var kk in (S.N||{})) if(S.N[kk]) nn++;
