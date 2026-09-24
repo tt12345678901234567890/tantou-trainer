@@ -1,7 +1,7 @@
 /* 短答すきまトレーナー — オフライン用サービスワーカー
    電波の入らない電車内でも開けるように、アプリ本体を端末に取り置きます。
    教材（cards.json）はここでは扱いません。端末の中だけに保存されています。 */
-var CACHE = 'tantou-app-v15';
+var CACHE = 'tantou-app-v16';
 var ASSETS = [
   './',
   './index.html',
