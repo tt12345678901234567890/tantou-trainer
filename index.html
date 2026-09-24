@@ -182,8 +182,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v17', APPDATE='2026-09-24';
+var APPVER='v18', APPDATE='2026-09-24';
 var CHANGES=[
+ ['v18','2026-09-24','ホーム画面を表示しただけで周が進んでしまい、解いたはずの肢がもう一度出る不具合を修正。周の起点を「その周の1肢目を解いた日」にそろえ、遅れの判定の矛盾（14日目なのに解き始めて1日）を解消'],
  ['v17','2026-09-24','全科目ページからも復習の件数を削除（判定はもともと周回のみ）'],
  ['v16','2026-09-24','画面を周回だけに整理。上部の復習件数とタブのバッジ、「半分だけ」「1分だけ」「外した肢の扱い」を削除。ペースの文章から復習を外し、直前チェックの説明を科目ごとの内容に'],
  ['v15','2026-09-24','復習を周回から切り離した。「今日のぶん」は周回を進める肢だけになり、1周まわり切るとその場で次の周に入る。復習は「復習だけ」から別枠で回す'],
@@ -570,7 +571,12 @@ function repeatEst(){ var d=dueList().length; return Math.min(d,Math.round(cap()
 function doneToday(){ var l=S.log[today()]; return l?(l.nw||0):0; }
 function budget(){ return Math.max(0,cap()-doneToday()); }
 function markSeen(id){
-  if(!S.cycFirst) S.cycFirst=today();   /* 遅れは「解き始めた日」から数える */
+  var first=true;
+  for(var k in S.cycSeen){ first=false; break; }
+  /* その周の1肢目を解いた日を、周の起点にする。
+     周が明けてから何日か空けても、始めた時点からの日数で測れる */
+  if(first) S.cycStart=today();
+  S.cycFirst=S.cycStart;
   S.cycSeen[id]=1;
 }
 function examDay(){ if(!S.examStr) return null; var d=new Date(S.examStr+'T00:00:00'); if(isNaN(d)) return null;
@@ -614,7 +620,7 @@ function planLists(total,opt){
   /* 通常は周回を進める。この周でまだ出していない肢だけを出す */
   var neu=base.filter(function(c){ return !S.cycSeen[c.i]; });
   if(!neu.length){          /* 1周まわり切ったら、その場で次の周に入る */
-    nextRound();
+    if(!opt.peek) nextRound();   /* 数を見るだけのときは進めない */
     neu=base.slice();
   }
   return shuf(pick(neu,total)).slice(0,total);
@@ -625,6 +631,7 @@ function nextRound(){
   save();
 }
 function planCounts(total,opt){
+  opt=opt||{}; opt.peek=true;
   var l=planLists(total,opt), t=today(), r={all:l.length,fresh:0,neu:0,again:0};
   l.forEach(function(c){ var L=S.L[c.i]; if(!L) r.neu++; else if(L.ng) r.again++; else r.fresh++; });
   return r;
@@ -1454,8 +1461,7 @@ function subjStat(x){
   var prog=total?Math.min(1,seen/total):0;
   /* この周でまだ1肢も解いていないうちは遅れを出さない。
      解き始めていれば、その日を起点に数える（周が明けた直後に遅れ扱いされないように） */
-  var first=(st.cycFirst!=null)?st.cycFirst:st.cycStart;
-  var workDays=(seen&&first!=null)?Math.max(1,t-first+1):0;
+  var workDays=(seen&&st.cycStart!=null)?Math.max(1,t-st.cycStart+1):0;
   var lag=(seen&&workDays&&cyc&&total)?(workDays-cyc*prog):null;
   var day=0,wk=0,tot=0,days=0,last=null;
   for(var d in (st.log||{})){
@@ -1529,8 +1535,7 @@ function vAll(){
        '<span class="num">'+(x.total?(x.seen+' / '+x.total+'肢（'+pct+'%）'):(x.seen+'肢／総数不明'))+'</span></div>';
     h+='<span style="font-size:11.5px;color:var(--sub);display:block;margin-top:6px;line-height:1.6">'+
        (x.rounds?x.rounds+'周完了・':'')+
-       (x.dayIn?(x.cyc+'日で1周の'+x.dayIn+'日目'+
-         (x.seen&&x.workDays&&x.workDays<x.dayIn?'（解き始めて'+x.workDays+'日）':'')):'周回の記録なし')+
+       (x.dayIn?(x.cyc+'日で1周の'+x.dayIn+'日目'):'周回の記録なし')+
        '　／　正答率'+(x.rate===null?'—':Math.round(x.rate*100)+'%')+
        '　／　直近7日 '+fmt(x.wk)+
        (x.dl!==null?'　／　本試験まで'+x.dl+'日':'')+
