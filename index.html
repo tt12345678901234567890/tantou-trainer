@@ -182,8 +182,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v18', APPDATE='2026-09-24';
+var APPVER='v19', APPDATE='2026-09-26';
 var CHANGES=[
+ ['v19','2026-09-26','科目別ページの遅れの数え方を全科目ページと統一（同じ科目で違う日数が出ていた）。全科目ページの上部タブで、いま開いている科目を押しても画面が戻らない不具合を修正'],
  ['v18','2026-09-24','ホーム画面を表示しただけで周が進んでしまい、解いたはずの肢がもう一度出る不具合を修正。周の起点を「その周の1肢目を解いた日」にそろえ、遅れの判定の矛盾（14日目なのに解き始めて1日）を解消'],
  ['v17','2026-09-24','全科目ページからも復習の件数を削除（判定はもともと周回のみ）'],
  ['v16','2026-09-24','画面を周回だけに整理。上部の復習件数とタブのバッジ、「半分だけ」「1分だけ」「外した肢の扱い」を削除。ペースの文章から復習を外し、直前チェックの説明を科目ごとの内容に'],
@@ -547,9 +548,12 @@ function cycState(){
   var daysLeft=Math.max(1,cyc()-dayIn+1);
   var remain=Math.max(0,total-seen);
   var over=Math.max(0,dayIn-cyc());
+  var prog=total?Math.min(1,seen/total):0;
+  var lag=(seen&&dayIn)?(dayIn-cyc()*prog):null;   /* 全科目ページと同じ測り方 */
   var per=Math.ceil(remain/daysLeft)||1;
   var capv=Math.min(per,Math.ceil(total/cyc())*2);
-  return {total:total,seen:seen,dayIn:dayIn,daysLeft:daysLeft,remain:remain,over:over,perDay:capv};
+  return {total:total,seen:seen,dayIn:dayIn,daysLeft:daysLeft,remain:remain,over:over,
+          prog:prog,lag:lag,perDay:capv};
 }
 function cap(){ return Math.max(1,cycState().perDay); }
 function setCycle(n){
@@ -1072,9 +1076,12 @@ function paceHtml(){
   var h='<div class="pace"><b style="font-weight:600">'+((S.rounds||0)+1)+'周目・'+c.dayIn+'日目</b>　'+
     '<em>'+c.seen+' / '+c.total+'肢</em>（'+pct+'％）';
   h+='<div class="bar" style="flex:none;width:100%;margin:7px 0 8px"><i style="width:'+pct+'%"></i></div>';
-  if(c.over>0){ warn=true;
-    h+='予定より<em>'+c.over+'日</em>おくれています。この周の残り'+c.remain+'肢。'+
+  if(c.lag!==null&&c.lag>=1){ warn=true;
+    h+='予定より<em>'+c.lag.toFixed(1)+'日分</em>おくれています。この周の残り'+c.remain+'肢。'+
        '1日の量は通常ペースの2倍（'+cap()+'肢）で頭打ちにしてあるので、一度に全部は降ってきません。';
+  } else if(c.lag!==null&&c.lag<=-1){
+    h+='予定より<em>'+(-c.lag).toFixed(1)+'日分</em>先行しています。この周の残り<em>'+c.remain+'肢</em>を<em>'+
+       c.daysLeft+'日</em>で。1日<em>'+cap()+'肢</em>＝<em>約'+mins(cap())+'分</em>です。';
   } else {
     h+='この周の残り<em>'+c.remain+'肢</em>を<em>'+c.daysLeft+'日</em>で。'+
        '1日<em>'+cap()+'肢</em>＝<em>約'+mins(cap())+'分</em>です。';
@@ -1622,7 +1629,11 @@ document.addEventListener('click',function(e){
     if(d.go==='reload'){ tmp={}; view='load'; render(); return; }
     startSession(d.go); return;
   }
-  if(d.subj){ if(d.subj!==M.sig){ switchTo(d.subj).then(scanSubjects).then(render); } return; }
+  if(d.subj){
+    ALL=null;
+    if(d.subj!==M.sig){ switchTo(d.subj).then(scanSubjects).then(render); }
+    else { view='home'; tmp={}; render(); }
+    return; }
   if(d.dropsubj){
     if(confirm(d.dropsubj+' の教材を削除します。学習記録は残ります。よろしいですか？')){
       var others=subjects().filter(function(x){return x!==d.dropsubj;});
