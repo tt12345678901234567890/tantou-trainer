@@ -143,10 +143,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
   color:var(--paper);padding:10px 18px;border-radius:22px;font-size:12.5px;opacity:0;
   pointer-events:none;transition:opacity .2s;z-index:50}
 .toast.on{opacity:.95}
-.spk{position:fixed;right:14px;bottom:calc(18px + env(safe-area-inset-bottom));width:50px;height:50px;
-  border-radius:25px;background:var(--ink);color:var(--paper);font-size:20px;display:flex;
-  align-items:center;justify-content:center;box-shadow:0 3px 12px rgba(0,0,0,.22);z-index:40}
-.spk.off{background:var(--card);color:var(--faint);border:1px solid var(--line)}
+.spkin{border:1px solid var(--line);background:var(--card);color:var(--sub);
+  border-radius:20px;padding:3px 10px;font-size:11px;margin-left:auto;white-space:nowrap}
+.spkin.off{opacity:.65}
 .wk{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);
   font-size:12.5px;width:100%;text-align:left}
 .wk .hz{flex:0 0 46px;font-size:10px;color:var(--paper);background:var(--sub);border-radius:3px;
@@ -182,8 +181,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v19', APPDATE='2026-09-26';
+var APPVER='v20', APPDATE='2026-09-28';
 var CHANGES=[
+ ['v20','2026-09-28','読み上げボタンが解説の文字に重なる不具合を修正。画面に浮かべるのをやめ、問題文の見出し行と「次へ」の隣に置いた'],
  ['v19','2026-09-26','科目別ページの遅れの数え方を全科目ページと統一（同じ科目で違う日数が出ていた）。全科目ページの上部タブで、いま開いている科目を押しても画面が戻らない不具合を修正'],
  ['v18','2026-09-24','ホーム画面を表示しただけで周が進んでしまい、解いたはずの肢がもう一度出る不具合を修正。周の起点を「その周の1肢目を解いた日」にそろえ、遅れの判定の矛盾（14日目なのに解き始めて1日）を解消'],
  ['v17','2026-09-24','全科目ページからも復習の件数を削除（判定はもともと周回のみ）'],
@@ -1152,6 +1152,7 @@ function vCard(){
     (c.k&&c.mk==='◎'?'<span class="hot">落とせない</span>':'')+
     (c.k&&c.ac!=null?'<span>正答率'+c.ac+'%</span>':'')+
     (sute(c)?'<span class="sute">深追い不要</span>':'')+
+    (window.speechSynthesis?'<button class="spkin'+(S.tts?'':' off')+'" data-say="q">🔊 読み上げ</button>':'')+
     '</div>';
   h+='<div class="q"><span class="qn">'+esc(c.L)+'</span>'+esc(c.q)+'</div></div>';
 
@@ -1276,7 +1277,8 @@ function vCard(){
     } else h+='<button data-note="edit"><b>メモを書く</b> — 自分の言葉で残せます</button>';
     h+='</div>';
 
-    h+='<div class="next"><button data-next="1">次へ</button>';
+    h+='<div class="next"><button data-next="1">次へ</button>'+
+       (window.speechSynthesis?'<button class="ghost" data-say="q">🔊</button>':'');
     if(right&&!tmp.kan&&!rt) h+='<button class="ghost" data-guess="1">勘だった</button>';
     h+='</div>';
     h+='<div class="note">'+(right&&!tmp.kan&&!rt
@@ -1608,11 +1610,6 @@ function render(){
   else h=vHome();
   el.innerHTML=h;
   var old=document.querySelector('.spk'); if(old) old.remove();
-  if(view==='card'&&window.speechSynthesis){
-    var b=document.createElement('button');
-    b.className='spk'+(S.tts?'':' off'); b.innerHTML='🔊'; b.setAttribute('data-say','q');
-    document.body.appendChild(b);
-  }
   window.scrollTo(0,0);
 }
 document.addEventListener('click',function(e){
