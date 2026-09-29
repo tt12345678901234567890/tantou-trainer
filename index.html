@@ -181,8 +181,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v20', APPDATE='2026-09-28';
+var APPVER='v21', APPDATE='2026-09-28';
 var CHANGES=[
+ ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
  ['v20','2026-09-28','読み上げボタンが解説の文字に重なる不具合を修正。画面に浮かべるのをやめ、問題文の見出し行と「次へ」の隣に置いた'],
  ['v19','2026-09-26','科目別ページの遅れの数え方を全科目ページと統一（同じ科目で違う日数が出ていた）。全科目ページの上部タブで、いま開いている科目を押しても画面が戻らない不具合を修正'],
  ['v18','2026-09-24','ホーム画面を表示しただけで周が進んでしまい、解いたはずの肢がもう一度出る不具合を修正。周の起点を「その周の1肢目を解いた日」にそろえ、遅れの判定の矛盾（14日目なのに解き始めて1日）を解消'],
@@ -1010,9 +1011,16 @@ function vHome(){
     var a=[]; if(p.neu)a.push('新規'+p.neu);
     if(p.fresh||p.again)a.push('2周目以降'+(p.fresh+p.again));
     return a.join(' ＋ '); }
-  var p1=planCounts(Math.max(1,bd));
-  h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+
-     '分・論点をまたいで出します。周回を進める肢だけで、復習は混ぜません</span></button>';
+  var dt2=doneToday(), frame=cap();
+  if(bd<=0){
+    h+='<button class="mode" data-go="today" style="opacity:.55"><b>今日のぶんは終わりました</b>'+
+       '<span>今日の枠'+frame+'肢のうち'+dt2+'肢すみ。先へ進めたいときは下の「もう少しやる」を使ってください</span></button>';
+  } else {
+    var p1=planCounts(bd);
+    h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+'分'+
+       (dt2>0?('・今日の枠'+frame+'肢のうち'+dt2+'肢すみ'):'')+
+       '。論点をまたいで出します。周回を進める肢だけで、復習は混ぜません</span></button>';
+  }
   var dn=dueList().length;
   h+='<button class="mode" data-go="rev"'+(dn?'':' style="opacity:.5"')+
      '><b>復習だけ</b><span>'+(dn?('予定日が来た'+dn+'肢から。周回とは別枠なので、今日のぶんの量は減りません')
@@ -1086,6 +1094,11 @@ function paceHtml(){
     h+='この周の残り<em>'+c.remain+'肢</em>を<em>'+c.daysLeft+'日</em>で。'+
        '1日<em>'+cap()+'肢</em>＝<em>約'+mins(cap())+'分</em>です。';
   }
+  var dt=doneToday();
+  if(dt>0)
+    h+='<br>今日はすでに<em>'+dt+'肢</em>すませました。'+
+       (budget()>0?('残り<em>'+budget()+'肢</em>で今日のぶんは終わりです。')
+                  :'今日のぶんは終わりです。');
   if(S.rounds) h+='<br>これまで<em>'+S.rounds+'周</em>まわりました。';
   var dl=daysLeftExam();
   if(dl!==null){ h+='<br>本試験まで<em>'+dl+'日</em>。この周期なら<em>あと約'+r+'周</em>。';
