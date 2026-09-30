@@ -181,8 +181,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v21', APPDATE='2026-09-28';
+var APPVER='v22', APPDATE='2026-09-29';
 var CHANGES=[
+ ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
  ['v20','2026-09-28','読み上げボタンが解説の文字に重なる不具合を修正。画面に浮かべるのをやめ、問題文の見出し行と「次へ」の隣に置いた'],
  ['v19','2026-09-26','科目別ページの遅れの数え方を全科目ページと統一（同じ科目で違う日数が出ていた）。全科目ページの上部タブで、いま開いている科目を押しても画面が戻らない不具合を修正'],
@@ -1011,14 +1012,14 @@ function vHome(){
     var a=[]; if(p.neu)a.push('新規'+p.neu);
     if(p.fresh||p.again)a.push('2周目以降'+(p.fresh+p.again));
     return a.join(' ＋ '); }
-  var dt2=doneToday(), frame=cap();
+  var dt2=doneToday();
   if(bd<=0){
     h+='<button class="mode" data-go="today" style="opacity:.55"><b>今日のぶんは終わりました</b>'+
-       '<span>今日の枠'+frame+'肢のうち'+dt2+'肢すみ。先へ進めたいときは下の「もう少しやる」を使ってください</span></button>';
+       '<span>今日は'+dt2+'肢すみ。先へ進めたいときは下の「もう少しやる」を使ってください</span></button>';
   } else {
     var p1=planCounts(bd);
     h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+'分'+
-       (dt2>0?('・今日の枠'+frame+'肢のうち'+dt2+'肢すみ'):'')+
+       (dt2>0?('・今日はすでに'+dt2+'肢すみ'):'')+
        '。論点をまたいで出します。周回を進める肢だけで、復習は混ぜません</span></button>';
   }
   var dn=dueList().length;
@@ -1084,21 +1085,23 @@ function paceHtml(){
   var h='<div class="pace"><b style="font-weight:600">'+((S.rounds||0)+1)+'周目・'+c.dayIn+'日目</b>　'+
     '<em>'+c.seen+' / '+c.total+'肢</em>（'+pct+'％）';
   h+='<div class="bar" style="flex:none;width:100%;margin:7px 0 8px"><i style="width:'+pct+'%"></i></div>';
+  var dt=doneToday(), bd2=budget();
+  /* 今日のぶんが終わっていれば、残りは明日以降の日数で割る */
+  var leftD=Math.max(1, bd2>0?c.daysLeft:(c.daysLeft-1));
+  var per=c.remain?Math.ceil(c.remain/leftD):0;
+  var when=(bd2>0?'今日を入れて<em>'+leftD+'日</em>':'あと<em>'+leftD+'日</em>');
   if(c.lag!==null&&c.lag>=1){ warn=true;
-    h+='予定より<em>'+c.lag.toFixed(1)+'日分</em>おくれています。この周の残り'+c.remain+'肢。'+
-       '1日の量は通常ペースの2倍（'+cap()+'肢）で頭打ちにしてあるので、一度に全部は降ってきません。';
+    h+='予定より<em>'+c.lag.toFixed(1)+'日分</em>おくれています。'+
+       'この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
   } else if(c.lag!==null&&c.lag<=-1){
-    h+='予定より<em>'+(-c.lag).toFixed(1)+'日分</em>先行しています。この周の残り<em>'+c.remain+'肢</em>を<em>'+
-       c.daysLeft+'日</em>で。1日<em>'+cap()+'肢</em>＝<em>約'+mins(cap())+'分</em>です。';
+    h+='予定より<em>'+(-c.lag).toFixed(1)+'日分</em>先行しています。'+
+       'この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
   } else {
-    h+='この周の残り<em>'+c.remain+'肢</em>を<em>'+c.daysLeft+'日</em>で。'+
-       '1日<em>'+cap()+'肢</em>＝<em>約'+mins(cap())+'分</em>です。';
+    h+='この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
   }
-  var dt=doneToday();
   if(dt>0)
     h+='<br>今日はすでに<em>'+dt+'肢</em>すませました。'+
-       (budget()>0?('残り<em>'+budget()+'肢</em>で今日のぶんは終わりです。')
-                  :'今日のぶんは終わりです。');
+       (bd2>0?('あと<em>'+bd2+'肢</em>で今日のぶんは終わりです。'):'今日のぶんは終わりです。');
   if(S.rounds) h+='<br>これまで<em>'+S.rounds+'周</em>まわりました。';
   var dl=daysLeftExam();
   if(dl!==null){ h+='<br>本試験まで<em>'+dl+'日</em>。この周期なら<em>あと約'+r+'周</em>。';
