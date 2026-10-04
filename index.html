@@ -181,7 +181,7 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v22', APPDATE='2026-09-29';
+var APPVER='v23', APPDATE='2026-10-04';
 var CHANGES=[
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
@@ -635,6 +635,17 @@ function nextRound(){
   S.rounds=(S.rounds||0)+1;
   S.cycStart=today(); S.cycFirst=null; S.cycSeen={};
   save();
+}
+/* この周をすべて解き終わっていたら、次の周に入れる。
+   解き終わっていない周では何もしない（途中の記録を消さないため） */
+function maybeNextRound(){
+  if(!CARDS.length||!S||!S.cycSeen) return false;
+  var total=poolTotal(); if(!total) return false;
+  var seen=0;
+  for(var k in S.cycSeen){ var c=BYID[k]; if(c&&inPool(c)) seen++; }
+  if(seen<total) return false;
+  nextRound();
+  return true;
 }
 function planCounts(total,opt){
   opt=opt||{}; opt.peek=true;
@@ -1470,6 +1481,16 @@ function loadAll(){
   })).then(function(rs){
     /* いま開いている科目は、保存待ちの分があるので手元の記録をそのまま使う */
     rs.forEach(function(r){ if(r.sig===M.sig) r.st=S; });
+    /* ほかの科目も、1周ぶん解き終わっていれば次の周にしておく */
+    rs.forEach(function(r){
+      if(r.sig===M.sig||!r.sum||!r.st||!r.st.cycSeen) return;
+      var tot=poolRankTotal(r.sum, r.st.pool||'mon', r.st.rank||'AB');
+      var sn=0; for(var k in r.st.cycSeen) sn++;
+      if(!tot||sn<tot) return;
+      r.st.rounds=(r.st.rounds||0)+1;
+      r.st.cycStart=today(); r.st.cycFirst=null; r.st.cycSeen={};
+      Store.set('trainer_state_'+r.sig, JSON.stringify(r.st));
+    });
     ALL=rs; return rs;
   });
 }
@@ -1615,6 +1636,8 @@ function nav(cur){
 /* ============ ルーティング ============ */
 function render(){
   var el=document.getElementById('app'), h='';
+  /* 出題中はさわらない。ホームなどを開いたときだけ周を切り替える */
+  if(view!=='card'&&view!=='finish'&&view!=='load') maybeNextRound();
   if(view==='load') h=vLoad();
   else if(view==='card'&&ses) h=vCard();
   else if(view==='finish'&&ses) h=vFinish();
