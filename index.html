@@ -181,7 +181,7 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v23', APPDATE='2026-10-04';
+var APPVER='v24', APPDATE='2026-10-04';
 var CHANGES=[
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
@@ -631,6 +631,18 @@ function planLists(total,opt){
   }
   return shuf(pick(neu,total)).slice(0,total);
 }
+function restOfRound(){
+  var n=0;
+  poolCards().forEach(function(c){ if(!S.cycSeen[c.i]) n++; });
+  return n;
+}
+/* 「もう少しやる」で出す数。周の残りが少なければ全部出し、
+   多いときは今日の枠の2倍（最低60肢）までにとどめる */
+function moreN(){
+  var rest=restOfRound();
+  if(!rest) return 0;
+  return Math.max(1, Math.min(rest, Math.max(cap()*2, 60)));
+}
 function nextRound(){
   S.rounds=(S.rounds||0)+1;
   S.cycStart=today(); S.cycFirst=null; S.cycSeen={};
@@ -660,7 +672,7 @@ function startSession(mode,arg){
   if(mode==='today') q=planLists(Math.max(1,budget()));
   else if(mode==='half') q=planLists(Math.max(1,Math.round(budget()*0.5)));
   else if(mode==='one') q=planLists(5);
-  else if(mode==='more') q=planLists(Math.max(5,Math.round(cap()*0.5)));
+  else if(mode==='more') q=planLists(moreN());
   else if(mode==='rev') q=planLists(Math.max(5,Math.min(dueList().length,cap())),{review:true});
   else if(mode==='topic') q=shuf(BYTP[arg]||[]).filter(poolOk).slice(0,30);
   else if(mode==='note'){ var ids=Object.keys(S.N||{}).filter(function(k){return S.N[k];});
@@ -1041,9 +1053,13 @@ function vHome(){
   if(wc) h+='<button class="mode" data-go="weak"><b>弱点つぶし</b><span>外した回数×出題頻度で並べた上位20肢。伸びしろが大きい順</span></button>';
   var nn=0; for(var kk in (S.N||{})) if(S.N[kk]) nn++;
   if(nn) h+='<button class="mode" data-go="note"><b>メモのある肢</b><span>'+nn+'肢。自分で書き足した分だけ回す</span></button>';
-  var pm=planCounts(Math.max(5,Math.round(cap()*0.5)));
-  h+='<button class="mode" data-go="more"'+(bd===0?' style="border-color:var(--ao)"':'')+
-     '><b>もう少しやる</b><span>'+pm.all+'肢を前倒し。'+(bd===0?'今日の枠は終わっていますが続けられます。':'枠とは別に先の肢を先取りします。')+'</span></button>';
+  var mn=moreN(), rest=restOfRound();
+  if(mn)
+    h+='<button class="mode" data-go="more"'+(bd<=0?' style="border-color:var(--ao)"':'')+
+       '><b>もう少しやる</b><span>'+mn+'肢。'+
+       (mn>=rest?'この周の残りを全部出します。':'この周の残り'+rest+'肢から先取りします。')+
+       (bd<=0?'今日の枠は終わっていますが続けられます。':'枠とは別に先へ進みます。')+
+       '</span></button>';
   h+='<button class="mode" data-go="pick"><b>論点を選ぶ</b><span>'+TOPICS.length+'論点。出題実績つきで並べています</span></button>';
   if(CZ.length){
     var czt=CZ.map(function(x){ return x.title; }).join('・');
