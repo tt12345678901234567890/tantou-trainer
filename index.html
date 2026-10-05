@@ -181,7 +181,7 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v25', APPDATE='2026-10-05';
+var APPVER='v26', APPDATE='2026-10-06';
 var CHANGES=[
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
@@ -1572,14 +1572,19 @@ function vAll(){
 
   /* いちばん遅れている科目を名指しする */
   var top=withLag[0];
-  if(top&&top.lag>=0.5){
+  var yet=S2.filter(function(x){ return x.total&&x.lag===null; })
+            .map(function(x){ return x.title.replace(' すきまトレーナー',''); });
+  var yetTxt=yet.length?('<br>'+esc(yet.join('・'))+'は、この周をこれから始めるところです。'):'';
+  if(top&&top.lag>=1){      /* 各科目のバッジと同じ基準 */
     h+='<div class="pace warn"><b style="font-weight:600">いまは'+esc(top.title.replace(' すきまトレーナー',''))+'から</b><br>'+
-       '予定より<em>'+top.lag.toFixed(1)+'日分</em>おくれています。'+
-
-       '</div>';
+       '予定より<em>'+top.lag.toFixed(1)+'日分</em>おくれています。'+yetTxt+'</div>';
   } else if(top){
-    h+='<div class="pace"><b style="font-weight:600">4科目とも予定どおりです</b><br>'+
-       'いちばん進みが遅いのは'+esc(top.title.replace(' すきまトレーナー',''))+'ですが、遅れは'+Math.max(0,top.lag).toFixed(1)+'日分です。</div>';
+    h+='<div class="pace"><b style="font-weight:600">'+
+       (withLag.length===S2.length?'どの科目も予定どおりです':'進行中の'+withLag.length+'科目は予定どおりです')+'</b><br>'+
+       'いちばん進みが遅いのは'+esc(top.title.replace(' すきまトレーナー',''))+'ですが、遅れは'+
+       Math.max(0,top.lag).toFixed(1)+'日分です。'+yetTxt+'</div>';
+  } else if(yet.length){
+    h+='<div class="pace"><b style="font-weight:600">どの科目もこれからです</b>'+yetTxt+'</div>';
   }
 
   h+='<div class="lbl" style="margin-top:18px">進捗（遅れている順）</div>';
