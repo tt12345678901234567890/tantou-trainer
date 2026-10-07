@@ -181,7 +181,7 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v26', APPDATE='2026-10-06';
+var APPVER='v27', APPDATE='2026-10-07';
 var CHANGES=[
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
@@ -714,8 +714,11 @@ function grade(id,good){
 }
 var prevView=null;
 var TICKMAX=10;   /* 5秒ごとに数えている。これを超える間隔は画面を離れていたとみなす */
-function tick(){
+function tick(force){
   if(!ses) return;
+  /* 問題画面にいないときは数えない（起点だけ引き直す）。
+     force は「いままで問題画面にいた」と分かっている場合に使う */
+  if(!force&&view!=='card'){ ses.t0=Date.now(); return; }
   var d=Math.round((Date.now()-ses.t0)/1000);
   ses.t0=Date.now();
   if(d<=0) return;
@@ -723,7 +726,7 @@ function tick(){
   ses.sec+=d;
   var t=today(), lg=S.log[t]||{n:0,ok:0,s:0}; lg.s=(lg.s||0)+d; S.log[t]=lg;
 }
-function resume(){ if(ses) ses.t0=Date.now(); }   /* 戻ってきたら計測を測り直す */
+function resume(){ if(ses) ses.t0=Date.now(); }   /* 戻ってきたら計測を測り直す（数えるのは問題画面にいるときだけ） */
 function answer(pick){
   var c=ses.queue[ses.i]; tick();
   ses.pick=pick; ses.graded=true; tmp.kan=false; tmp.sh=false;
@@ -1672,7 +1675,7 @@ function render(){
   el.innerHTML=h;
   /* 問題画面にいる間だけ数える。入ったら測り直し、離れたらそこまでを確定 */
   if(view==='card') resume();
-  else if(ses&&prevView==='card') tick();
+  else if(ses&&prevView==='card') tick(true);
   prevView=view;
   var old=document.querySelector('.spk'); if(old) old.remove();
   window.scrollTo(0,0);
