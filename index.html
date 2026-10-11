@@ -95,6 +95,10 @@ button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer
   border-right:1px solid var(--line);line-height:1.35}
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--ink);color:var(--paper);font-weight:600}
+/* 教材のタブが4つ以上になったら2段に折り返す */
+.seg.wrap{flex-wrap:wrap}
+.seg.wrap button{flex:1 0 33.33%;max-width:33.34%;border-bottom:1px solid var(--line)}
+.seg.wrap button:last-child{border-right:1px solid var(--line)}
 .lbl{font-size:11.5px;color:var(--faint);margin:18px 0 0}
 .pace{font-size:12px;color:var(--sub);line-height:1.68;margin:10px 0 0;
   padding:11px 13px;background:var(--card);border-radius:10px}
@@ -181,8 +185,10 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v27', APPDATE='2026-10-07';
+var APPVER='v29', APPDATE='2026-10-11';
 var CHANGES=[
+ ['v29','2026-10-11','企業法に直前答練2回分160肢を追加。教材の種類ごとにランクを決め打ちできるようにし、企業法に「Ａ＋答練」「ＡＢ＋答練」のタブを追加した（このタブではランクの選択は出ない）'],
+ ['v28','2026-10-10','直前答練に対応。監査論に直前答練2回分160肢を追加し、「使う教材」に 問題集＋答練／直前答練 のタブを足した。教材の種類はファイル側で定義するようにしたので、第3回以降も教材を入れ替えるだけで増やせる'],
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
  ['v21','2026-09-28','「今日のぶん」の残りと1日の目安が食い違って見える件を解消。今日すでに解いた分を表示し、枠を使い切ったときはその旨を出すように'],
  ['v20','2026-09-28','読み上げボタンが解説の文字に重なる不具合を修正。画面に浮かべるのをやめ、問題文の見出し行と「次へ」の隣に置いた'],
@@ -293,16 +299,39 @@ function scanSubjects(){
 }
 function sumKey(sig){ return 'trainer_sum_'+sig; }
 function saveSummary(){
+  /* h は教材の種類ごとのＡＢＣ内訳。m／k は古い版との互換のために残す。 */
   var h={m:[0,0,0],k:[0,0,0]}, idx={'Ａ':0,'Ｂ':1,'Ｃ':2};
-  CARDS.forEach(function(c){ var i=idx[c.r]; if(i===undefined) return; h[c.k?'k':'m'][i]++; });
-  try{ lset(sumKey(M.sig), JSON.stringify({title:M.title,n:CARDS.length,t:TOPICS.length,v:DVER,h:h})); }catch(e){}
+  CARDS.forEach(function(c){ var i=idx[c.r]; if(i===undefined) return;
+    var kk=c.k||0; if(!h[kk]) h[kk]=[0,0,0]; h[kk][i]++;
+    if(kk===0) h.m[i]++; else if(kk===1) h.k[i]++; });
+  try{ lset(sumKey(M.sig), JSON.stringify({title:M.title,n:CARDS.length,t:TOPICS.length,v:DVER,h:h,
+    pools:(M.pools||[]).map(function(p){ return {id:p.id,k:p.k||null,rk:p.rk||null}; })})); }catch(e){}
 }
 function getSummary(sig){ try{ return JSON.parse(lget(sumKey(sig))||'null'); }catch(e){ return null; } }
+function rankSum(r,code){ if(!r) return 0;
+  return code==='A'?r[0]:(code==='AB'?r[0]+r[1]:r[0]+r[1]+r[2]); }
 function poolRankTotal(sm,pool,rank){
   if(!sm||!sm.h) return sm?sm.n:0;
-  var rows=[]; if(pool!=='kako') rows.push(sm.h.m); if(pool!=='mon') rows.push(sm.h.k);
-  var n=0; rows.forEach(function(r){
-    n += rank==='A'?r[0]:(rank==='AB'?r[0]+r[1]:r[0]+r[1]+r[2]); });
+  var h=sm.h, i, pd=null, n=0;
+  if(sm.pools) for(i=0;i<sm.pools.length;i++) if(sm.pools[i].id===pool) pd=sm.pools[i];
+  var ks=(pd&&pd.k)||null, rk=(pd&&pd.rk)||null, kk, hasNum=false;
+  for(kk in h) if(/^\d+$/.test(kk)) hasNum=true;
+  if(!hasNum){
+    /* 古い要約（教材の種類ごとの内訳がない）は m／k から足す */
+    if(pool!=='kako') n+=rankSum(h.m,rank);
+    if(pool!=='mon') n+=rankSum(h.k,rank);
+    return n;
+  }
+  if(!ks&&pool==='mon') ks=[0];
+  if(!ks&&pool==='kako') ks=[1];
+  if(!ks){ ks=[]; for(kk in h) if(/^\d+$/.test(kk)) ks.push(+kk); }
+  if(ks.length){
+    for(i=0;i<ks.length;i++) n+=rankSum(h[ks[i]], rk?(rk[String(ks[i])]||'ABC'):rank);
+    return n;
+  }
+  /* 教材の種類が分からないとき（古い要約）は m／k から足す */
+  if(pool!=='kako') n+=rankSum(h.m,rank);
+  if(pool!=='mon') n+=rankSum(h.k,rank);
   return n;
 }
 /* 要約（総肢数の内訳）は科目を開いたときに作られる。
@@ -314,9 +343,12 @@ function ensureSummary(sig){
     if(!txt) return null;
     try{
       var d=JSON.parse(txt), h={m:[0,0,0],k:[0,0,0]}, idx={'Ａ':0,'Ｂ':1,'Ｃ':2};
-      (d.cards||[]).forEach(function(c){ var i=idx[c.r]; if(i===undefined) return; h[c.k?'k':'m'][i]++; });
+      (d.cards||[]).forEach(function(c){ var i=idx[c.r]; if(i===undefined) return;
+        var kk=c.k||0; if(!h[kk]) h[kk]=[0,0,0]; h[kk][i]++;
+        if(kk===0) h.m[i]++; else if(kk===1) h.k[i]++; });
+      var pls=((d.meta&&d.meta.pools)||[]).map(function(p){ return {id:p.id,k:p.k||null,rk:p.rk||null}; });
       var o={title:(d.meta&&d.meta.title)||sig, n:(d.cards||[]).length,
-             t:(d.topics||[]).length, v:d.v||'', h:h};
+             t:(d.topics||[]).length, v:d.v||'', h:h, pools:pls};
       try{ lset(sumKey(sig), JSON.stringify(o)); }catch(e){}
       return o;
     }catch(e){ return null; }
@@ -495,15 +527,35 @@ function exams(){
   return mx||0;
 }
 function exLabel(){ var n=exams(); return n?('過去'+n+'回'):'収録した過去問'; }
-function poolOk(c){
-  if(S.pool==='mon') return !c.k;
-  if(S.pool==='kako') return !!c.k;
-  return true;
+/* 教材の種類は、カードの k で区別する（0=問題集 1=過年度本試験 2=直前答練）。
+   どの k をまとめて出すかは教材ファイルの pools[].k が決める。
+   k の指定がない古い教材ファイルのために、id からの判定も残してある。 */
+function poolKs(id){
+  var pl=pool(id);
+  if(pl&&pl.k) return pl.k;
+  if(id==='mon') return [0];
+  if(id==='kako') return [1];
+  return null;                     /* null は全部 */
 }
+function inKs(ks,c){
+  if(!ks) return true;
+  var k=c.k||0;
+  for(var i=0;i<ks.length;i++) if(ks[i]===k) return true;
+  return false;
+}
+function poolOk(c){ return inKs(poolKs(S.pool),c); }
 function pool(id){ for(var i=0;i<M.pools.length;i++) if(M.pools[i].id===id) return M.pools[i]; return null; }
-function poolCount(id){ return CARDS.filter(function(c){
-  return id==='mon'?!c.k:(id==='kako'?!!c.k:true); }).length; }
-function rankOk(c){ return S.rank==='A'?c.r==='Ａ':S.rank==='AB'?c.r!=='Ｃ':true; }
+/* 教材の種類ごとにランクを決め打ちするタブ（例：問題集はＡだけ＋答練は全部）。
+   pools[].rk が {"0":"A"} のような形で入っていると、そのタブではランクの絞り込みを
+   画面の設定ではなく教材ファイル側の指定で行う。rk に載っていない種類は全ランク。 */
+function poolRk(id){ var pl=pool(id); return (pl&&pl.rk)?pl.rk:null; }
+function rkOf(id,c){ var rk=poolRk(id); if(!rk) return null; return rk[String(c.k||0)]||'ABC'; }
+function rankMatch(code,c){ return code==='A'?c.r==='Ａ':code==='AB'?c.r!=='Ｃ':true; }
+function poolCount(id){ var ks=poolKs(id), rk=poolRk(id);
+  return CARDS.filter(function(c){
+    if(!inKs(ks,c)) return false;
+    return rk?rankMatch(rkOf(id,c),c):true; }).length; }
+function rankOk(c){ var v=rkOf(S.pool,c); return rankMatch(v||S.rank,c); }
 var _hot=null;
 function hotSet(){
   if(_hot) return _hot;
@@ -973,7 +1025,7 @@ function vHome(){
     'ブラウザに保存できていません。記録タブから控えを書き出すか、Safari／Chromeでファイルを直接開いてください。</div>';
 
   if(M.pools.length>1){
-    h+='<div class="lbl" style="margin-top:20px">使う教材</div><div class="seg">';
+    h+='<div class="lbl" style="margin-top:20px">使う教材</div><div class="seg'+(M.pools.length>3?' wrap':'')+'">';
     M.pools.forEach(function(pl){
       h+='<button data-pool="'+pl.id+'" class="'+(S.pool===pl.id?'on':'')+'">'+esc(pl.label)+
          '<br><span style="font-size:9.5px;opacity:.75">'+esc(pl.sub||(poolCount(pl.id)+'肢'))+'</span></button>';
@@ -983,11 +1035,23 @@ function vHome(){
     if(cur&&cur.note) h+='<div class="note" style="margin-top:-10px">'+esc(cur.note)+'</div>';
   }
 
+  var fixRk=poolRk(S.pool);
+  if(fixRk){
+    /* このタブは教材の種類ごとにランクが決まっているので、ランクの選択は出さない */
+    var parts=[], KN={0:'問題集',1:'過年度本試験',2:'直前答練'}, RN={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'};
+    (poolKs(S.pool)||[0,1,2]).forEach(function(kk){
+      var n=CARDS.filter(function(c){ return (c.k||0)===kk&&rankMatch(fixRk[String(kk)]||'ABC',c); }).length;
+      if(n) parts.push((KN[kk]||'教材')+'の'+(RN[fixRk[String(kk)]||'ABC'])+' '+n+'肢');
+    });
+    h+='<div class="note" style="margin-top:14px">このタブは出題するランクが決まっています：'+esc(parts.join(' ＋ '))+'。'+
+       'ランクを自分で選びたいときは「短答対策」タブに切り替えてください。</div>';
+  }else{
   h+='<div class="lbl" style="margin-top:18px">出題するランク</div><div class="seg">';
   [['A','Ａのみ'],['AB','Ａ＋Ｂ'],['ABC','全部']].forEach(function(r){
     var n=CARDS.filter(function(c){return poolOk(c)&&(r[0]==='A'?c.r==='Ａ':r[0]==='AB'?c.r!=='Ｃ':true);}).length;
     h+='<button data-rank="'+r[0]+'" class="'+(S.rank===r[0]?'on':'')+'">'+r[1]+'<br><span style="font-size:9.5px;opacity:.75">'+n+'肢</span></button>'; });
   h+='</div>';
+  }
 
   var hotN=CARDS.filter(function(c){ return poolOk(c)&&rankOk(c)&&!!hotSet()[c.t]; }).length;
   var hotT=0; TOPICS.forEach(function(t){ if(hotSet()[t.c]) hotT++; });
@@ -1001,7 +1065,7 @@ function vHome(){
     :'すべての論点から出します。')+'</div>';
   var aN=CARDS.filter(function(c){ return poolOk(c)&&c.r==='Ａ'; }).length,
       allN=CARDS.filter(poolOk).length;
-  if(allN&&aN/allN>0.7)
+  if(!fixRk&&allN&&aN/allN>0.7)
     h+='<div class="note">この科目はほとんどの肢がＡなので、ランクの絞り込みではあまり量が減りません。'+
        '減らしたいときは上の「よく出る論点だけ」を使ってください。</div>';
   h+='<div class="lbl" style="margin-top:18px">出題のかたより</div><div class="seg">'+
@@ -1016,7 +1080,7 @@ function vHome(){
       '<b>そろそろ過去問を足す時期です</b>'+s2.why+'。'+
       '講義の優先順位では過去問集は4番目で、学習が進んだ段階か本試験1か月前からで足ります。'+
       '繰り返す必要はなく、出方に慣れるのが目的です。'+
-      '<div class="mini"><button data-pool="all" style="border-color:var(--ao);color:var(--ao)">両方に切り替える</button>'+
+      '<div class="mini"><button data-pool="all" style="border-color:var(--ao);color:var(--ao)">全部に切り替える</button>'+
       '<button data-s2="x" style="color:var(--faint)">まだ問題集に集中する</button></div></div>';
   }
   h+=paceHtml();
@@ -1082,7 +1146,7 @@ function monRate(){
 function stage2(){
   if(S.pool!=='mon'||S.s2dis) return null;
   var hasKako=false;
-  for(var i=0;i<CARDS.length;i++){ if(CARDS[i].k){ hasKako=true; break; } }
+  for(var i=0;i<CARDS.length;i++){ if(CARDS[i].k===1){ hasKako=true; break; } }
   if(!hasKako) return null;
   var r=monRate(), dl=daysLeftExam();
   if(r>=0.7) return {r:r,why:'問題集の'+Math.round(r*100)+'%に手が付きました'};
