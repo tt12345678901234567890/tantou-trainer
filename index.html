@@ -97,6 +97,22 @@ button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer
 .seg button.on{background:var(--ink);color:var(--paper);font-weight:600}
 /* 教材のタブが4つ以上になったら2段に折り返す */
 .seg.wrap{flex-wrap:wrap}
+.na{border:1px solid var(--ink);border-radius:12px;padding:12px 13px;margin:16px 0 4px;font-size:12.5px;line-height:1.7}
+.na>b{font-size:13.5px;font-weight:600;display:block;margin-bottom:7px}
+.na .r{display:flex;align-items:baseline;gap:8px;padding:5px 0;width:100%;text-align:left;font:inherit}
+.na button.r{border-bottom:1px solid var(--line)}
+.na button.r:last-of-type{border-bottom:0}
+.na button.r u::after{content:'  ›';color:var(--faint)}
+.na button.r.off{opacity:.45}
+.na .r i{font-style:normal;color:var(--faint);flex:0 0 14px}
+.na .r u{text-decoration:none;flex:1}
+.na .r s{text-decoration:none;color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+.na .ft{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--sub);font-size:11.5px}
+.na .ft span{white-space:nowrap}
+.na.q{border-color:var(--line)}
+.bdg{display:inline-block;min-width:15px;padding:0 4px;margin-left:5px;border-radius:7px;
+  background:var(--line);color:var(--sub);font-size:9.5px;line-height:15px;font-weight:600}
+.bdg.idle{background:none;color:var(--hold);box-shadow:inset 0 0 0 1px var(--hold)}
 .seg.wrap button{flex:1 0 33.33%;max-width:33.34%;border-bottom:1px solid var(--line)}
 .seg.wrap button:last-child{border-right:1px solid var(--line)}
 .lbl{font-size:11.5px;color:var(--faint);margin:18px 0 0}
@@ -185,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v29', APPDATE='2026-10-11';
+var APPVER='v30', APPDATE='2026-10-14';
 var CHANGES=[
+ ['v30','2026-10-14','「今日のぶん」を1日の持ち時間からの逆算に変更し、復習ぶんを合算して配分するようにした。「予定より◯日おくれ」の表示をやめ、代わりに今日の使い方を上部に出す。全科目に優先順位、科目タブに戻ってきた肢のバッジ、相談用のコピーを追加'],
  ['v29','2026-10-11','企業法に直前答練2回分160肢を追加。教材の種類ごとにランクを決め打ちできるようにし、企業法に「Ａ＋答練」「ＡＢ＋答練」のタブを追加した（このタブではランクの選択は出ない）'],
  ['v28','2026-10-10','直前答練に対応。監査論に直前答練2回分160肢を追加し、「使う教材」に 問題集＋答練／直前答練 のタブを足した。教材の種類はファイル側で定義するようにしたので、第3回以降も教材を入れ替えるだけで増やせる'],
  ['v22','2026-09-28','今日のぶんを終えているのに、その日を残り日数に数えて1日あたりの量を少なく見せていた不具合を修正（残り222肢・最終日前日なら「あと1日で222肢」と表示）'],
@@ -308,6 +325,14 @@ function saveSummary(){
     pools:(M.pools||[]).map(function(p){ return {id:p.id,k:p.k||null,rk:p.rk||null}; })})); }catch(e){}
 }
 function getSummary(sig){ try{ return JSON.parse(lget(sumKey(sig))||'null'); }catch(e){ return null; } }
+var POOLNM={mon:'短答対策',kako:'過年度本試験',dan:'直前答練',all:'全部'};
+function poolLabelOf(sm,pool,sig){
+  var ps=(sm&&sm.pools)||[],i;
+  for(i=0;i<ps.length;i++) if(ps[i].id===pool&&ps[i].label) return ps[i].label;
+  if(M&&sig===M.sig){ var ms=M.pools||[];
+    for(i=0;i<ms.length;i++) if(ms[i].id===pool) return ms[i].label||pool; }
+  return POOLNM[pool]||pool;
+}
 function rankSum(r,code){ if(!r) return 0;
   return code==='A'?r[0]:(code==='AB'?r[0]+r[1]:r[0]+r[1]+r[2]); }
 function poolRankTotal(sm,pool,rank){
@@ -338,7 +363,9 @@ function poolRankTotal(sm,pool,rank){
    無い科目は、しまってある教材から一度だけ作り直す。 */
 function ensureSummary(sig){
   var sm=getSummary(sig);
-  if(sm&&sm.h) return Promise.resolve(sm);
+  /* プール名が入っていない古い要約は、一度だけ作り直す */
+  var oldPl=sm&&sm.h&&(!sm.pools||!sm.pools.length||sm.pools[0].label===undefined);
+  if(sm&&sm.h&&!oldPl) return Promise.resolve(sm);
   return Cards.get(sig).then(function(txt){
     if(!txt) return null;
     try{
@@ -346,7 +373,7 @@ function ensureSummary(sig){
       (d.cards||[]).forEach(function(c){ var i=idx[c.r]; if(i===undefined) return;
         var kk=c.k||0; if(!h[kk]) h[kk]=[0,0,0]; h[kk][i]++;
         if(kk===0) h.m[i]++; else if(kk===1) h.k[i]++; });
-      var pls=((d.meta&&d.meta.pools)||[]).map(function(p){ return {id:p.id,k:p.k||null,rk:p.rk||null}; });
+      var pls=((d.meta&&d.meta.pools)||[]).map(function(p){ return {id:p.id,label:p.label||p.id,k:p.k||null,rk:p.rk||null}; });
       var o={title:(d.meta&&d.meta.title)||sig, n:(d.cards||[]).length,
              t:(d.topics||[]).length, v:d.v||'', h:h, pools:pls};
       try{ lset(sumKey(sig), JSON.stringify(o)); }catch(e){}
@@ -506,7 +533,7 @@ function migrateBackup(o){
   return f;
 }
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
-  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,ver:1}; }
+  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
 S=fresh();
 function today(){ var d=new Date(); d.setHours(0,0,0,0); return Math.floor(d.getTime()/864e5); }
 function cyc(){ return S.cyc||7; }
@@ -627,7 +654,30 @@ function setCycle(n){
 }
 function repeatEst(){ var d=dueList().length; return Math.min(d,Math.round(cap()*0.45)); }
 function doneToday(){ var l=S.log[today()]; return l?(l.nw||0):0; }
-function budget(){ return Math.max(0,cap()-doneToday()); }
+/* 1日の持ち時間から、復習と周回への配り方を決める。
+   S.tmin が null のときは、従来どおり周回のノルマから逆算した分数をあてる */
+var TMIN=[10,20,30,45,60];
+function dayPlan(){
+  var sp=secPer();
+  var R=dueList().length;            /* 予定日が来た肢（戻ってきた肢） */
+  var C=restOfRound();               /* この周でまだ出していない肢 */
+  var auto=(S.tmin==null);
+  var T=auto?Math.max(5,Math.round(cap()*sp/60)):S.tmin;
+  var q=Math.max(1,Math.floor(T*60/sp));           /* 今日ぜんぶで何肢やれるか */
+  var p=(R+C)?R/(R+C):0;
+  p=Math.min(0.8,Math.max(0.4,p));
+  if(!R) p=0;
+  var rev=Math.min(R,Math.round(q*p));
+  var cy=Math.max(0,q-rev);
+  var lg=S.log[today()]||{};
+  var dw=lg.nw||0, dr=Math.max(0,(lg.n||0)-dw);
+  var tot=cycState().total;
+  return {min:T,auto:auto,q:q,rev:rev,cyc:cy,
+          revLeft:Math.max(0,rev-dr),cycLeft:Math.max(0,cy-dw),
+          doneRev:dr,doneCyc:dw,R:R,C:C,sp:sp,
+          days:(tot&&cy)?Math.ceil(tot/cy):null};   /* このペースなら1周に何日か */
+}
+function budget(){ return dayPlan().cycLeft; }
 function markSeen(id){
   var first=true;
   for(var k in S.cycSeen){ first=false; break; }
@@ -725,7 +775,8 @@ function startSession(mode,arg){
   else if(mode==='half') q=planLists(Math.max(1,Math.round(budget()*0.5)));
   else if(mode==='one') q=planLists(5);
   else if(mode==='more') q=planLists(moreN());
-  else if(mode==='rev') q=planLists(Math.max(5,Math.min(dueList().length,cap())),{review:true});
+  else if(mode==='rev'){ var rl=dayPlan().revLeft;
+    q=planLists(Math.max(5,Math.min(dueList().length,rl>0?rl:cap())),{review:true}); }
   else if(mode==='topic') q=shuf(BYTP[arg]||[]).filter(poolOk).slice(0,30);
   else if(mode==='note'){ var ids=Object.keys(S.N||{}).filter(function(k){return S.N[k];});
     q=shuf(ids.map(function(i){return BYID[i];}).filter(Boolean)).slice(0,30); }
@@ -1013,16 +1064,13 @@ function vHome(){
   h+='<div class="hd"><div><h1 class="ttl">'+esc(M.title)+'</h1>'+
     '<div class="sub">'+(M.sub?esc(M.sub)+' ':'')+poolTotal()+'肢／全'+CARDS.length+'肢・'+TOPICS.length+'論点</div></div></div><div class="rule"></div>';
   h+='<div class="lbl">この周の残り '+cst.remain+'肢 ／ '+cst.total+'肢中</div>';
-  if(d>20)
-    h+='<div class="note" style="color:var(--hold)">戻ってきた肢が'+d+'肢たまっています。'+
-       '周回のじゃまをしないよう、今日のぶんには混ぜていません。'+
-       '手が空いたときに「復習だけ」で崩してください。</div>';
   var T=timeStats();
   h+='<div class="time"><div><b>'+fmt(T.day)+'</b><span>今日</span></div>'+
      '<div><b>'+fmt(T.week)+'</b><span>直近7日</span></div>'+
      '<div><b>'+fmt(T.all)+'</b><span>累計'+(T.days?'・'+T.days+'日':'')+'</span></div></div>';
   if(PERSIST==='memory') h+='<div class="alert"><b>この画面を閉じると記録が消えます</b>'+
     'ブラウザに保存できていません。記録タブから控えを書き出すか、Safari／Chromeでファイルを直接開いてください。</div>';
+  h+=nextHtml();
 
   if(M.pools.length>1){
     h+='<div class="lbl" style="margin-top:20px">使う教材</div><div class="seg'+(M.pools.length>3?' wrap':'')+'">';
@@ -1098,7 +1146,8 @@ function vHome(){
        '<span>'+(MODES[rz.m]?MODES[rz.m].nm:'論点')+'　'+rz.i+' / '+rz.q.length+'肢まで完了</span></button>'; }
 
   h+='<div class="lbl" style="margin-top:20px">今日やる分</div>';
-  var bd=budget();
+  var P2=dayPlan();
+  var bd=P2.cycLeft;
   function brk(p){
     var a=[]; if(p.neu)a.push('新規'+p.neu);
     if(p.fresh||p.again)a.push('2周目以降'+(p.fresh+p.again));
@@ -1111,11 +1160,14 @@ function vHome(){
     var p1=planCounts(bd);
     h+='<button class="mode" data-go="today"><b>今日のぶん</b><span>'+p1.all+'肢（'+brk(p1)+'）。約'+mins(p1.all)+'分'+
        (dt2>0?('・今日はすでに'+dt2+'肢すみ'):'')+
-       '。論点をまたいで出します。周回を進める肢だけで、復習は混ぜません</span></button>';
+       '。論点をまたいで出します。周回を進める肢だけで、復習は上の枠で別に数えています</span></button>';
   }
-  var dn=dueList().length;
-  h+='<button class="mode" data-go="rev"'+(dn?'':' style="opacity:.5"')+
-     '><b>復習だけ</b><span>'+(dn?('予定日が来た'+dn+'肢から。周回とは別枠なので、今日のぶんの量は減りません')
+  var dn=P2.R;
+  h+='<button class="mode" data-go="rev"'+(dn?(P2.revLeft>0?' style="border-color:var(--ink)"':''):' style="opacity:.5"')+
+     '><b>復習だけ</b><span>'+(dn
+       ?(P2.revLeft>0
+          ?('予定日が来た'+dn+'肢から、今日は'+P2.revLeft+'肢（約'+mins(P2.revLeft)+'分）。先にこちらから')
+          :('予定日が来た'+dn+'肢。今日の枠は使い切りましたが、続けて崩せます'))
        :'いまは戻ってきた肢がありません')+'</span></button>';
   var wc=weakCards().length;
   if(wc) h+='<button class="mode" data-go="weak"><b>弱点つぶし</b><span>外した回数×出題頻度で並べた上位20肢。伸びしろが大きい順</span></button>';
@@ -1162,16 +1214,60 @@ function sortedSubjects(){
     return x-y || (a<b?-1:1);
   });
 }
+/* その科目を最後に解いてから何日たったか。分からなければ99日あつかい */
+function subjIdle(sg){
+  var t=today();
+  if(sg===M.sig){ var ls=null; for(var k in S.log){ if(S.log[k].s&&(ls===null||+k>ls)) ls=+k; }
+    return ls===null?99:(t-ls); }
+  if(!ALL) return 0;
+  for(var i=0;i<ALL.length;i++) if(ALL[i].sig===sg){
+    var lg=(ALL[i].st&&ALL[i].st.log)||{}, l2=null;
+    for(var k2 in lg){ if(lg[k2].s&&(l2===null||+k2>l2)) l2=+k2; }
+    return l2===null?99:(t-l2);
+  }
+  return 0;
+}
 function subjBar(cur){
   var a=sortedSubjects();
   if(!a.length) return '';
   var h='<div class="subj">';
   h+='<button data-go="all" class="'+(cur==='all'?'on':'')+'">全科目</button>';
   a.forEach(function(sg){
+    var dn=SUBDUE[sg]||0, idle=subjIdle(sg);
     h+='<button data-subj="'+esc(sg)+'" class="'+(cur!=='all'&&sg===M.sig?'on':'')+'">'+
-       esc(SHORT[sg]||sg)+'</button>';
+       esc(SHORT[sg]||sg)+
+       (dn?('<span class="bdg'+(idle>=3?' idle':'')+'">'+dn+'</span>'):'')+'</button>';
   });
   h+='</div>';
+  return h;
+}
+/* 今日の使い方を、持ち時間から逆算して出す。ここが画面のネクストアクション */
+function nextHtml(){
+  var P=dayPlan(), c=cycState();
+  var h='<div class="lbl" style="margin-top:18px">今日の持ち時間</div><div class="seg wrap">';
+  h+='<button data-tmin="auto" class="'+(P.auto?'on':'')+'">おまかせ<br>'+
+     '<span style="font-size:9.5px;opacity:.75">'+P.min+'分</span></button>';
+  TMIN.forEach(function(n){
+    h+='<button data-tmin="'+n+'" class="'+(!P.auto&&S.tmin===n?'on':'')+'">'+n+'分</button>'; });
+  h+='</div>';
+  h+='<div class="na"><b>今日の'+P.min+'分の使い方</b>';
+  if(P.revLeft>0)
+    h+='<button class="r" data-go="rev"><i>①</i><u>復習だけ</u><s>'+mins(P.revLeft)+'分 / '+P.revLeft+'肢</s></button>';
+  else if(P.R)
+    h+='<button class="r off" data-go="rev"><i>①</i><u>復習だけ</u><s>今日のぶんは済み</s></button>';
+  if(P.cycLeft>0)
+    h+='<button class="r" data-go="today"><i>'+(P.R?'②':'①')+'</i><u>今日のぶん</u><s>'+mins(P.cycLeft)+'分 / '+P.cycLeft+'肢</s></button>';
+  else
+    h+='<button class="r off" data-go="today"><i>'+(P.R?'②':'①')+'</i><u>今日のぶん</u><s>今日のぶんは済み</s></button>';
+  var ft=[];
+  if(P.R) ft.push('戻り肢 '+P.R+'肢');
+  if(P.days) ft.push('このペースで1周'+P.days+'日（設定'+cyc()+'日）');
+  if(P.doneRev+P.doneCyc) ft.push('今日'+(P.doneRev+P.doneCyc)+'肢');
+  if(ft.length) h+='<div class="ft"><span>'+ft.join('</span>　／　<span>')+'</span></div>';
+  h+='</div>';
+  if(P.R&&P.days&&P.days>cyc()*1.6)
+    h+='<div class="note">1周が設定より大きく延びています。持ち時間を増やすか、'+
+       '「よく出る論点だけ」で範囲を絞ってください。戻り肢を先に崩すほうが点になります。</div>';
   return h;
 }
 function paceHtml(){
@@ -1185,15 +1281,9 @@ function paceHtml(){
   var leftD=Math.max(1, bd2>0?c.daysLeft:(c.daysLeft-1));
   var per=c.remain?Math.ceil(c.remain/leftD):0;
   var when=(bd2>0?'今日を入れて<em>'+leftD+'日</em>':'あと<em>'+leftD+'日</em>');
-  if(c.lag!==null&&c.lag>=1){ warn=true;
-    h+='予定より<em>'+c.lag.toFixed(1)+'日分</em>おくれています。'+
-       'この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
-  } else if(c.lag!==null&&c.lag<=-1){
-    h+='予定より<em>'+(-c.lag).toFixed(1)+'日分</em>先行しています。'+
-       'この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
-  } else {
-    h+='この周の残り<em>'+c.remain+'肢</em>を'+when+'で。1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
-  }
+  /* 「予定より◯日おくれ」は出さない。遅れても持ち時間の中で配り直すだけなので、
+     代わりに「設定どおりに終わらせるなら1日何肢か」という事実だけを置く */
+  h+='この周の残り<em>'+c.remain+'肢</em>。設定の'+cyc()+'日で終えるなら'+when+'で1日<em>'+per+'肢</em>＝<em>約'+mins(per)+'分</em>です。';
   if(dt>0)
     h+='<br>今日はすでに<em>'+dt+'肢</em>すませました。'+
        (bd2>0?('あと<em>'+bd2+'肢</em>で今日のぶんは終わりです。'):'今日のぶんは終わりです。');
@@ -1608,7 +1698,10 @@ function subjStat(x){
     topics:sm?sm.t:0, total:total, started:started, seen:seen, prog:prog,
     cyc:cyc, dayIn:dayIn, lag:lag, workDays:workDays, rate:n?ok/n:null, due:SUBDUE[x.sig]||0,
     day:day, wk:wk, tot:tot, days:days, last:last, dl:dl,
-    rounds:st.rounds||0, rank:rank, noData:!sm};
+    rounds:st.rounds||0, rank:rank, noData:!sm,
+    pool:pool, hot:st.hot?1:0, mix:st.mix||'freq', tmin:(st.tmin==null?null:st.tmin),
+    stay:total?(SUBDUE[x.sig]||0)/total:0, idle:(last===null?99:(t-last)),
+    poolLabel:poolLabelOf(sm,pool,x.sig)};
 }
 function dayLabel(d){
   var dt=new Date(d*864e5);
@@ -1626,6 +1719,72 @@ function timeText(days){
   }
   return lines.length?lines.join('\n'):'まだ記録がありません。';
 }
+/* 戻り肢の滞留率で並べ、3日以上触っていない科目を1段くり上げる */
+function priOrder(S2){
+  var a=S2.filter(function(x){ return x.total; }).slice();
+  a.sort(function(p,q){ return q.stay-p.stay; });
+  for(var i=1;i<a.length;i++)
+    if(a[i].idle>=3&&a[i-1].idle<3){ var w=a[i]; a[i]=a[i-1]; a[i-1]=w; }
+  return a;
+}
+function shortName(x){ return (x.title||x.sig).replace(' すきまトレーナー',''); }
+/* 全角を2文字ぶんで数えて、等幅で見たときに桁が揃うようにする */
+function dw(t){ var n=0,i,c; t=String(t);
+  for(i=0;i<t.length;i++){ c=t.charCodeAt(i);
+    n+=(c>0x1100&&(c<=0x115f||c===0x2329||c===0x232a||
+      (c>=0x2e80&&c<=0xa4cf&&c!==0x303f)||(c>=0xac00&&c<=0xd7a3)||
+      (c>=0xf900&&c<=0xfaff)||(c>=0xfe30&&c<=0xfe6f)||
+      (c>=0xff00&&c<=0xff60)||(c>=0xffe0&&c<=0xffe6)))?2:1; }
+  return n; }
+function padR(t,w){ t=String(t); while(dw(t)<w) t+=' '; return t; }
+function padL(t,w){ t=String(t); while(dw(t)<w) t=' '+t; return t; }
+/* 相談用の書き出し。肢の個別データは入れず、人が読める形にする */
+function adviceText(){
+  var S2=(ALL||[]).map(subjStat), t=today(), L=[];
+  var dl=null; S2.forEach(function(x){ if(x.dl!==null&&dl===null) dl=x.dl; });
+  var d=new Date(), pad=function(n){ return (n<10?'0':'')+n; };
+  L.push('== すきまトレーナー 進捗 '+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+
+         ' '+pad(d.getHours())+':'+pad(d.getMinutes())+
+         (dl!==null?(' / 本試験まで'+dl+'日'):'')+' ==');
+  L.push('');
+  var rows=[['科目','プール','周回','進捗','正答率','戻り肢','直近7日','今日']];
+  var tp=0,td=0,tw=0,tdy=0;
+  priOrder(S2).forEach(function(x){
+    rows.push([shortName(x), String(x.total), (x.rounds+1)+'周'+(x.dayIn||0)+'日目',
+      x.seen+' ('+Math.round(x.prog*100)+'%)',
+      x.rate===null?'—':Math.round(x.rate*100)+'%',
+      String(x.due), x.wk?fmt(x.wk):'—', x.day?fmt(x.day):'—']);
+    tp+=x.total; td+=x.due; tw+=x.wk; tdy+=x.day;
+  });
+  rows.push(['合計',String(tp),'','','',String(td),tw?fmt(tw):'—',tdy?fmt(tdy):'—']);
+  /* 列ごとに中身の実幅で桁をそろえる（全角まじりでもくずれないように） */
+  var wd=[]; rows.forEach(function(r){ r.forEach(function(c,i){ wd[i]=Math.max(wd[i]||0,dw(c)); }); });
+  var AL=[0,1,0,0,1,1,1,1];   /* 0=左づめ 1=右づめ */
+  rows.forEach(function(r){
+    var line=r.map(function(c,i){ return AL[i]?padL(c,wd[i]):padR(c,wd[i]); }).join('  ');
+    L.push(line.replace(/\s+$/,''));
+  });
+  L.push('');
+  L.push('今日どれからやるか（戻り肢の滞留率。3日以上空きは繰り上げ）');
+  priOrder(S2).forEach(function(x,i){
+    var tg='';
+    if(x.idle>=3) tg+='  '+(x.idle>90?'未着手':x.idle+'日空き');
+    if(x.day) tg+='  今日'+fmt(x.day)+'すみ';
+    L.push('  '+(i+1)+'  '+shortName(x)+'  滞留'+Math.round(x.stay*100)+'%'+tg);
+  });
+  L.push('');
+  L.push('日次（直近14日）');
+  L.push(timeText(14));
+  L.push('');
+  L.push('設定');
+  var RN={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'};
+  S2.forEach(function(x){
+    L.push('  '+shortName(x)+'　'+x.poolLabel+'('+x.total+'肢) / '+(RN[x.rank]||x.rank)+
+      ' / '+(x.hot?'よく出る論点だけ':'全論点')+' / '+(x.mix==='freq'?'頻出を厚く':'均等')+
+      ' / '+x.cyc+'日で1周'+(x.tmin==null?' / 持ち時間おまかせ':' / 持ち時間'+x.tmin+'分'));
+  });
+  return L.join('\n');
+}
 function vAll(){
   var h=subjBar('all');
   h+='<div class="hd"><h1 class="ttl">全科目</h1><button class="sub" data-go="home" style="font-size:12px">戻る</button></div><div class="rule"></div>';
@@ -1633,36 +1792,37 @@ function vAll(){
   if(!ALL.length) return h+'<div class="lead">まだ科目が入っていません。記録タブの「教材の追加・入れ替え」から読み込んでください。</div>'+nav('all');
   var S2=ALL.map(subjStat);
   var unk=S2.filter(function(x){ return !x.total; });
-  var withLag=S2.filter(function(x){ return x.lag!==null&&x.total; });
-  withLag.sort(function(a,b){ return b.lag-a.lag; });
-  var order=withLag.concat(S2.filter(function(x){ return withLag.indexOf(x)<0; }));
+  var order;
 
-  /* いちばん遅れている科目を名指しする */
-  var top=withLag[0];
-  var yet=S2.filter(function(x){ return x.total&&x.lag===null; })
-            .map(function(x){ return x.title.replace(' すきまトレーナー',''); });
-  var yetTxt=yet.length?('<br>'+esc(yet.join('・'))+'は、この周をこれから始めるところです。'):'';
-  if(top&&top.lag>=1){      /* 各科目のバッジと同じ基準 */
-    h+='<div class="pace warn"><b style="font-weight:600">いまは'+esc(top.title.replace(' すきまトレーナー',''))+'から</b><br>'+
-       '予定より<em>'+top.lag.toFixed(1)+'日分</em>おくれています。'+yetTxt+'</div>';
-  } else if(top){
-    h+='<div class="pace"><b style="font-weight:600">'+
-       (withLag.length===S2.length?'どの科目も予定どおりです':'進行中の'+withLag.length+'科目は予定どおりです')+'</b><br>'+
-       'いちばん進みが遅いのは'+esc(top.title.replace(' すきまトレーナー',''))+'ですが、遅れは'+
-       Math.max(0,top.lag).toFixed(1)+'日分です。'+yetTxt+'</div>';
-  } else if(yet.length){
-    h+='<div class="pace"><b style="font-weight:600">どの科目もこれからです</b>'+yetTxt+'</div>';
+  /* 戻り肢の滞留率で、今日どれから手を付けるかを出す */
+  var pri=priOrder(S2);
+  if(pri.length){
+    h+='<div class="na"><b>今日どれからやるか</b>';
+    pri.forEach(function(x,i){
+      var tag=[];
+      if(x.idle>=3) tag.push(x.idle>90?'未着手':x.idle+'日空き');
+      if(x.day) tag.push('今日'+fmt(x.day)+'すみ');
+      h+='<div class="r"><i>'+(i+1)+'</i><u>'+esc(shortName(x))+
+         (tag.length?'<span style="color:var(--faint);font-size:11px">　'+esc(tag.join('・'))+'</span>':'')+
+         '</u><s>滞留 '+Math.round(x.stay*100)+'%</s></div>';
+    });
+    h+='<div class="ft">滞留率＝戻ってきた肢 ÷ プール肢数。'+
+       '3日以上さわっていない科目は1段くり上げています。</div></div>';
   }
 
-  h+='<div class="lbl" style="margin-top:18px">進捗（遅れている順）</div>';
+  h+='<div class="lbl" style="margin-top:18px">進捗（優先順位の順）</div>';
+  order=pri.concat(S2.filter(function(x){ return pri.indexOf(x)<0; }));
   order.forEach(function(x){
     var nm=esc(x.title.replace(' すきまトレーナー',''));
     var pct=Math.round(x.prog*100);
-    var lag=(x.lag===null||!x.total)?null:x.lag;
-    var tag=!x.total?'<span class="sute">集計できません</span>'
-      :lag===null?(x.seen?'<span class="sute">未着手</span>':'<span class="sute">この周はこれから</span>')
-      :(lag>=1?'<span class="hot">'+lag.toFixed(1)+'日おくれ</span>'
-      :(lag<=-1?'<span class="rk Ｂ">'+(-lag).toFixed(1)+'日ぶん先行</span>':'<span class="rk Ｂ">予定どおり</span>'));
+    var tag;
+    if(!x.total){ tag='<span class="sute">集計できません</span>'; }
+    else{
+      tag='<span class="'+(x.stay>=.8?'hot':'rk Ｂ')+'">滞留 '+Math.round(x.stay*100)+'%</span>';
+      if(x.idle>=3) tag+='<span class="again">'+(x.idle>90?'未着手':x.idle+'日空き')+'</span>';
+      else if(x.day) tag+='<span class="rk Ｂ">今日'+fmt(x.day)+'</span>';
+      else if(!x.seen) tag+='<span class="sute">この周はこれから</span>';
+    }
     h+='<button class="mode" data-subj2="'+esc(x.sig)+'" style="padding:13px">';
     h+='<div class="tag" style="margin-bottom:7px"><b style="font-size:15px">'+nm+'</b>'+tag+
        '</div>';
@@ -1692,7 +1852,7 @@ function vAll(){
     if(!x.day&&!x.wk) return;
     h+='<div class="row" style="border-bottom:1px solid var(--line)">'+
        '<span class="nm">'+esc(x.title.replace(' すきまトレーナー',''))+'</span>'+
-       '<span class="num">今日 '+fmt(x.day)+'</span>'+
+       '<span class="num">今日 '+(x.day?fmt(x.day):'—')+'</span>'+
        '<span class="num" style="flex:0 0 78px;text-align:right">7日 '+fmt(x.wk)+'</span></div>';
   });
   h+='</div>';
@@ -1700,18 +1860,26 @@ function vAll(){
     h+='<textarea id="tc" readonly style="min-height:130px">'+esc(timeText(7))+'</textarea>'+
        '<div class="mini"><button data-tc="copy">コピー</button><button data-tc="close">閉じる</button></div>'+
        '<div class="note">Study Plus などに記録するとき用です。日ごとの科目別内訳が入っています。</div>';
+  }
+  if(tmp.tadv){
+    h+='<textarea id="tc" readonly style="min-height:220px;font-size:11px">'+esc(tmp.tadvText||'')+'</textarea>'+
+       '<div class="mini"><button data-tc="copy">コピー</button><button data-tc="close">閉じる</button></div>'+
+       '<div class="note">進捗・優先順位・日次の内訳・設定が1つに入っています。'+
+       'そのまま貼れば、こちらで読めます。</div>';
   } else {
-    h+='<div class="mini"><button data-tc="open">記録用に書き出す</button></div>';
+    h+='<div class="mini"><button data-tc="open">記録用に書き出す</button>'+
+       '<button data-tc="adv">相談用にコピー</button></div>';
   }
 
   if(unk.length)
     h+='<div class="caution" style="margin-top:14px"><b>'+esc(unk.map(function(x){
         return x.title.replace(' すきまトレーナー',''); }).join('・'))+'は総数が分かりません。</b>'+
        'その科目を一度開けば集計できるようになります。上の一覧でタップしてください。</div>';
-  h+='<div class="caution" style="margin-top:16px"><b>遅れの見かた。</b>'+
-     '「1周する日数」に対して、いま何日目で何％進んでいるかを比べています。'+
-     '10日で1周の設定で5日目なら50%が予定どおり。30%しか進んでいなければ2日分のおくれです。'+
-     '科目ごとに周期を変えていても比べられます。</div>';
+  h+='<div class="caution" style="margin-top:16px"><b>滞留率の見かた。</b>'+
+     '予定日が来たのに戻していない肢が、その科目のプールの何％かを出しています。'+
+     '高いほど「解いたのに置きっぱなし」が多い＝取りこぼしが効く科目なので、先に手を付けます。'+
+     '3日以上さわっていない科目は、滞留率が低くても1段くり上げています。'+
+     '取れる時間が短い日は、上から1科目だけでかまいません。</div>';
   h+=nav('all');
   return h;
 }
@@ -1773,8 +1941,14 @@ document.addEventListener('click',function(e){
     } return; }
   if(d.subj2){ ALL=null; if(d.subj2!==M.sig){ switchTo(d.subj2).then(scanSubjects).then(render); } else { view='home'; render(); } return; }
   if(d.tc){
-    if(d.tc==='open'){ tmp.tcopy=1; render(); return; }
-    if(d.tc==='close'){ tmp.tcopy=0; render(); return; }
+    if(d.tc==='open'){ tmp.tcopy=1; tmp.tadv=0; render(); return; }
+    if(d.tc==='close'){ tmp.tcopy=0; tmp.tadv=0; render(); return; }
+    if(d.tc==='adv'){
+      var txt=adviceText(); tmp.tadvText=txt; tmp.tadv=1; tmp.tcopy=0;
+      if(navigator.clipboard&&navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(function(){ toast('コピーしました'); },function(){});
+      render(); return;
+    }
     if(d.tc==='copy'){ var x=document.getElementById('tc'); x.select();
       try{ document.execCommand('copy'); toast('コピーしました'); }catch(e){ toast('長押しでコピーしてください'); } return; }
   }
@@ -1822,6 +1996,10 @@ document.addEventListener('click',function(e){
   if(d.ex){
     if(d.ex==='set'){ var v=document.getElementById('exd').value; S.examStr=v||null; save(); render(); return; }
     if(d.ex==='clr'){ S.examStr=null; save(); render(); return; }
+  }
+  if(d.tmin){
+    S.tmin=(d.tmin==='auto')?null:(+d.tmin||null);
+    save(); render(); return;
   }
   if(d.exp){
     if(d.exp==='copy2'){
