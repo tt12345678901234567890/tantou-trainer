@@ -201,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v30', APPDATE='2026-10-14';
+var APPVER='v31', APPDATE='2026-10-18';
 var CHANGES=[
+ ['v31','2026-10-18','全科目ページとエクスポートの母数がそろっていなかったのを修正。プール肢数・戻り肢・周回の進捗・正答率が「使う教材／出題するランク／出す範囲」を無視して数えられていたため、「よく出る論点だけ」にしている科目で実際より大きい数字が出ていた（戻り肢がプール肢数を超えることもあった）。科目ごとに出題プールの肢IDを持たせて数えるようにした'],
  ['v30','2026-10-14','「今日のぶん」を1日の持ち時間からの逆算に変更し、復習ぶんを合算して配分するようにした。「予定より◯日おくれ」の表示をやめ、代わりに今日の使い方を上部に出す。全科目に優先順位、科目タブに戻ってきた肢のバッジ、相談用のコピーを追加'],
  ['v29','2026-10-11','企業法に直前答練2回分160肢を追加。教材の種類ごとにランクを決め打ちできるようにし、企業法に「Ａ＋答練」「ＡＢ＋答練」のタブを追加した（このタブではランクの選択は出ない）'],
  ['v28','2026-10-10','直前答練に対応。監査論に直前答練2回分160肢を追加し、「使う教材」に 問題集＋答練／直前答練 のタブを足した。教材の種類はファイル側で定義するようにしたので、第3回以降も教材を入れ替えるだけで増やせる'],
@@ -301,17 +302,62 @@ var Cards={
   del:function(sig){ return idb('readwrite',function(st){ return st.delete(sig); })
     .then(null,function(){}).then(function(){ try{localStorage.removeItem('trainer_cards_'+sig);}catch(e){} }); }
 };
-var SUBDUE={};
+var SUBDUE={}, SUBTOT={}, SUBSEEN={}, SUBRATE={}, SUBAPX={};
 function subjects(){ try{ return JSON.parse(lget('trainer_subjects')||'[]'); }catch(e){ return []; } }
-/* 各科目の「今日戻ってくる肢」の数を、教材を開かずに記録だけから数える */
+/* 出題プールの中身は科目ごとに違う（教材・ランク・よく出る論点だけ）。
+   どの肢が入っているかを肢IDの一覧として状態に持たせ、全科目ページはそれで数える。
+   持っていない科目だけ教材を読んで作り、以後は使い回す。 */
+function stSig(st){ return (st.pool||'mon')+'|'+(st.rank||'AB')+'|'+(st.hot?1:0); }
+function poolIdsFor(d,st){
+  var cards=d.cards||[], tops=d.topics||[], pls=(d.meta&&d.meta.pools)||[];
+  var pid=st.pool||'mon', rank=st.rank||'AB', pl=null, i;
+  for(i=0;i<pls.length;i++) if(pls[i].id===pid) pl=pls[i];
+  var ks=(pl&&pl.k)||(pid==='mon'?[0]:(pid==='kako'?[1]:null)), rk=(pl&&pl.rk)||null;
+  var H=null;
+  if(st.hot){
+    var ts=tops.slice().sort(function(a,b){ return b.w-a.w; }), tot=0, acc=0;
+    ts.forEach(function(t){ tot+=t.w; }); H={};
+    for(i=0;i<ts.length;i++){ if(acc>=tot*0.8) break; acc+=ts[i].w; H[ts[i].c]=1; }
+  }
+  var out=[];
+  for(i=0;i<cards.length;i++){
+    var c=cards[i], k=c.k||0;
+    if(ks&&ks.indexOf(k)<0) continue;
+    var code=rk?(rk[String(k)]||'ABC'):rank;
+    if(!(code==='A'?c.r==='Ａ':code==='AB'?c.r!=='Ｃ':true)) continue;
+    if(H&&!H[c.t]) continue;
+    out.push(c.i);
+  }
+  return out;
+}
+function tally(sg,st,ids,t){
+  var set=null, i;
+  if(ids){ set={}; for(i=0;i<ids.length;i++) set[ids[i]]=1; }
+  var L=st.L||{}, n=0, nn=0, ok=0, k;
+  for(k in L){ if(set&&!set[k]) continue;
+    if(L[k].due<=t) n++; nn+=L[k].n||0; ok+=L[k].ok||0; }
+  var seen=0, cs=st.cycSeen||{};
+  for(k in cs){ if(set&&!set[k]) continue; seen++; }
+  SUBDUE[sg]=n; SUBSEEN[sg]=seen; SUBTOT[sg]=ids?ids.length:0;
+  SUBRATE[sg]=nn?ok/nn:null; SUBAPX[sg]=ids?0:1;
+}
 function scanSubjects(){
   var a=subjects(), t=today();
   return Promise.all(a.map(function(sg){
     return Store.get('trainer_state_'+sg).then(function(v){
-      var n=0;
-      try{ var st=JSON.parse(v||'{}'); for(var k in (st.L||{})) if(st.L[k].due<=t) n++; }catch(e){}
-      SUBDUE[sg]=n;
-    },function(){ SUBDUE[sg]=0; });
+      var st={}; try{ st=JSON.parse(v||'{}'); }catch(e){}
+      var sig=stSig(st);
+      if(st.pids&&st.psig===sig) return tally(sg,st,st.pids,t);
+      /* いま開いている科目は save() 側が書くので、ここでは保存しない */
+      var open=(typeof M!=='undefined'&&M&&M.sig===sg);
+      return Cards.get(sg).then(function(txt){
+        var ids=null;
+        if(txt){ try{ ids=poolIdsFor(JSON.parse(txt),st);
+          if(!open){ st.pids=ids; st.psig=sig; Store.set('trainer_state_'+sg,JSON.stringify(st)); }
+        }catch(e){ ids=null; } }
+        tally(sg,st,ids,t);
+      },function(){ tally(sg,st,null,t); });
+    },function(){ SUBDUE[sg]=0; SUBAPX[sg]=1; });
   }));
 }
 function sumKey(sig){ return 'trainer_sum_'+sig; }
@@ -545,7 +591,15 @@ function load(){ return Store.get(KEY).then(function(v){
   if(!S.L)S.L={}; if(!S.log)S.log={}; if(!S.N)S.N={}; if(!S.cycSeen)S.cycSeen={};
   if(S.cycStart===null) S.cycStart=today();
 }); }
-function save(){ clearTimeout(saveT); saveT=setTimeout(function(){ Store.set(KEY,JSON.stringify(S)); },220); }
+function syncPool(){
+  if(!CARDS||!CARDS.length) return;
+  var sig=stSig(S);
+  if(S.psig===sig&&S.pids) return;
+  S.pids=poolCards().map(function(c){ return c.i; }); S.psig=sig;
+}
+function save(){ clearTimeout(saveT); saveT=setTimeout(function(){
+  try{ syncPool(); }catch(e){}
+  Store.set(KEY,JSON.stringify(S)); },220); }
 
 /* ============ 出題プール ============ */
 function exams(){
@@ -1671,11 +1725,14 @@ function loadAll(){
 function subjStat(x){
   var st=x.st||{}, sm=x.sum, t=today();
   var rank=st.rank||'AB', pool=st.pool||'mon';
-  var total=sm?poolRankTotal(sm,pool,rank):0;
+  var apx=!!SUBAPX[x.sig];
+  var total=SUBTOT[x.sig]||(sm?poolRankTotal(sm,pool,rank):0);
   var L=st.L||{}, started=0, n=0, ok=0;
   for(var k in L){ started++; n+=L[k].n||0; ok+=L[k].ok||0; }
   var seen=0, cs=st.cycSeen||{};
   for(var k2 in cs) seen++;
+  if(SUBSEEN[x.sig]!=null) seen=SUBSEEN[x.sig];
+  var rate=(SUBRATE[x.sig]!==undefined&&SUBRATE[x.sig]!==null)?SUBRATE[x.sig]:(n?ok/n:null);
   var cyc=st.cyc||7;
   var dayIn=(st.cycStart!=null)?Math.max(1,t-st.cycStart+1):0;
   var prog=total?Math.min(1,seen/total):0;
@@ -1696,7 +1753,7 @@ function subjStat(x){
     if(!isNaN(dd)) dl=Math.floor(dd.getTime()/864e5)-t; }
   return {sig:x.sig, title:(sm&&sm.title)||x.sig, ver:sm&&sm.v, cards:sm?sm.n:0,
     topics:sm?sm.t:0, total:total, started:started, seen:seen, prog:prog,
-    cyc:cyc, dayIn:dayIn, lag:lag, workDays:workDays, rate:n?ok/n:null, due:SUBDUE[x.sig]||0,
+    cyc:cyc, dayIn:dayIn, lag:lag, workDays:workDays, rate:rate, due:SUBDUE[x.sig]||0, apx:apx,
     day:day, wk:wk, tot:tot, days:days, last:last, dl:dl,
     rounds:st.rounds||0, rank:rank, noData:!sm,
     pool:pool, hot:st.hot?1:0, mix:st.mix||'freq', tmin:(st.tmin==null?null:st.tmin),
@@ -1765,6 +1822,8 @@ function adviceText(){
     L.push(line.replace(/\s+$/,''));
   });
   L.push('');
+  if(S2.some(function(x){ return x.apx; }))
+    L.push('※「概算」の科目は教材を読めず、プールの絞り込みを反映できていません');
   L.push('今日どれからやるか（戻り肢の滞留率。3日以上空きは繰り上げ）');
   priOrder(S2).forEach(function(x,i){
     var tg='';
@@ -1822,6 +1881,7 @@ function vAll(){
       if(x.idle>=3) tag+='<span class="again">'+(x.idle>90?'未着手':x.idle+'日空き')+'</span>';
       else if(x.day) tag+='<span class="rk Ｂ">今日'+fmt(x.day)+'</span>';
       else if(!x.seen) tag+='<span class="sute">この周はこれから</span>';
+      if(x.apx) tag+='<span class="sute">概算</span>';
     }
     h+='<button class="mode" data-subj2="'+esc(x.sig)+'" style="padding:13px">';
     h+='<div class="tag" style="margin-bottom:7px"><b style="font-size:15px">'+nm+'</b>'+tag+
