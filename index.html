@@ -201,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v31', APPDATE='2026-10-18';
+var APPVER='v32', APPDATE='2026-10-18';
 var CHANGES=[
+ ['v32','2026-10-18','「よく出る論点だけ」の線引きを、出題実績の重みの上位80%から85%に広げ、足切りとちょうど同じ重みの論点はすべて入れるようにした。同点の採否が論点の並び順で決まっていたのと、出題実績データに取りこぼしがあったときに境界の論点が落ちるのを防ぐため。4科目あわせて2,792肢→3,075肢'],
  ['v31','2026-10-18','全科目ページとエクスポートの母数がそろっていなかったのを修正。プール肢数・戻り肢・周回の進捗・正答率が「使う教材／出題するランク／出す範囲」を無視して数えられていたため、「よく出る論点だけ」にしている科目で実際より大きい数字が出ていた（戻り肢がプール肢数を超えることもあった）。科目ごとに出題プールの肢IDを持たせて数えるようにした'],
  ['v30','2026-10-14','「今日のぶん」を1日の持ち時間からの逆算に変更し、復習ぶんを合算して配分するようにした。「予定より◯日おくれ」の表示をやめ、代わりに今日の使い方を上部に出す。全科目に優先順位、科目タブに戻ってきた肢のバッジ、相談用のコピーを追加'],
  ['v29','2026-10-11','企業法に直前答練2回分160肢を追加。教材の種類ごとにランクを決め打ちできるようにし、企業法に「Ａ＋答練」「ＡＢ＋答練」のタブを追加した（このタブではランクの選択は出ない）'],
@@ -313,12 +314,7 @@ function poolIdsFor(d,st){
   var pid=st.pool||'mon', rank=st.rank||'AB', pl=null, i;
   for(i=0;i<pls.length;i++) if(pls[i].id===pid) pl=pls[i];
   var ks=(pl&&pl.k)||(pid==='mon'?[0]:(pid==='kako'?[1]:null)), rk=(pl&&pl.rk)||null;
-  var H=null;
-  if(st.hot){
-    var ts=tops.slice().sort(function(a,b){ return b.w-a.w; }), tot=0, acc=0;
-    ts.forEach(function(t){ tot+=t.w; }); H={};
-    for(i=0;i<ts.length;i++){ if(acc>=tot*0.8) break; acc+=ts[i].w; H[ts[i].c]=1; }
-  }
+  var H=st.hot?hotFrom(tops):null;
   var out=[];
   for(i=0;i<cards.length;i++){
     var c=cards[i], k=c.k||0;
@@ -638,14 +634,18 @@ function poolCount(id){ var ks=poolKs(id), rk=poolRk(id);
     return rk?rankMatch(rkOf(id,c),c):true; }).length; }
 function rankOk(c){ var v=rkOf(S.pool,c); return rankMatch(v||S.rank,c); }
 var _hot=null;
-function hotSet(){
-  if(_hot) return _hot;
-  var ts=TOPICS.slice().sort(function(a,b){ return b.w-a.w; });
-  var tot=0; ts.forEach(function(t){ tot+=t.w; });
-  var acc=0; _hot={};
-  for(var i=0;i<ts.length;i++){ if(acc>=tot*0.8) break; acc+=ts[i].w; _hot[ts[i].c]=1; }
-  return _hot;
+var HOTSHARE=0.85;
+/* 出題実績の重みが大きい順に、累計が HOTSHARE に届くまでを「よく出る論点」とする。
+   足切りとちょうど同じ重みの論点は、配列の並び順で採否が決まってしまわないよう全部入れる。 */
+function hotFrom(tops){
+  var ts=tops.slice().sort(function(a,b){ return b.w-a.w; });
+  var tot=0, i; ts.forEach(function(t){ tot+=t.w; });
+  var acc=0, h={}, cut=null;
+  for(i=0;i<ts.length;i++){ if(acc>=tot*HOTSHARE) break; acc+=ts[i].w; h[ts[i].c]=1; cut=ts[i].w; }
+  if(cut) for(i=0;i<ts.length;i++) if(ts[i].w===cut) h[ts[i].c]=1;
+  return h;
 }
+function hotSet(){ if(_hot) return _hot; _hot=hotFrom(TOPICS); return _hot; }
 function hotOk(c){ return S.hot?!!hotSet()[c.t]:true; }
 function inPool(c){ return poolOk(c)&&rankOk(c)&&hotOk(c); }
 function poolCards(){ return CARDS.filter(inPool); }
@@ -1163,7 +1163,7 @@ function vHome(){
      '<button data-hot="1" class="'+(S.hot?'on':'')+'">よく出る論点だけ<br><span style="font-size:9.5px;opacity:.75">'+
        hotT+'論点 '+hotN+'肢</span></button></div>';
   h+='<div class="note" style="margin-top:-10px">'+(S.hot
-    ?'出題実績の重みで上位8割を占める'+hotT+'論点だけを出します。時間が足りないときはここまで割り切ってください。'
+    ?'出題実績の重みで上位'+Math.round(HOTSHARE*100)+'%を占める'+hotT+'論点だけを出します。足切りと同じ重みの論点は全部入れています。時間が足りないときはここまで割り切ってください。'
     :'すべての論点から出します。')+'</div>';
   var aN=CARDS.filter(function(c){ return poolOk(c)&&c.r==='Ａ'; }).length,
       allN=CARDS.filter(poolOk).length;
