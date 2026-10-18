@@ -201,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v32', APPDATE='2026-10-18';
+var APPVER='v33', APPDATE='2026-10-19';
 var CHANGES=[
+ ['v33','2026-10-19','v31で入れた「出題プールの肢IDを覚えておく仕組み」が、しきい値と教材バージョンの変化を見ていなかった不具合を修正。v32でしきい値を85%に広げても、設定を触っていない科目は80%当時の肢数のまま表示されていた（教材ファイルを入れ替えたときも同じ）。あわせて要約にプール名を入れ、毎回作り直されないようにした'],
  ['v32','2026-10-18','「よく出る論点だけ」の線引きを、出題実績の重みの上位80%から85%に広げ、足切りとちょうど同じ重みの論点はすべて入れるようにした。同点の採否が論点の並び順で決まっていたのと、出題実績データに取りこぼしがあったときに境界の論点が落ちるのを防ぐため。4科目あわせて2,792肢→3,075肢'],
  ['v31','2026-10-18','全科目ページとエクスポートの母数がそろっていなかったのを修正。プール肢数・戻り肢・周回の進捗・正答率が「使う教材／出題するランク／出す範囲」を無視して数えられていたため、「よく出る論点だけ」にしている科目で実際より大きい数字が出ていた（戻り肢がプール肢数を超えることもあった）。科目ごとに出題プールの肢IDを持たせて数えるようにした'],
  ['v30','2026-10-14','「今日のぶん」を1日の持ち時間からの逆算に変更し、復習ぶんを合算して配分するようにした。「予定より◯日おくれ」の表示をやめ、代わりに今日の使い方を上部に出す。全科目に優先順位、科目タブに戻ってきた肢のバッジ、相談用のコピーを追加'],
@@ -308,7 +309,12 @@ function subjects(){ try{ return JSON.parse(lget('trainer_subjects')||'[]'); }ca
 /* 出題プールの中身は科目ごとに違う（教材・ランク・よく出る論点だけ）。
    どの肢が入っているかを肢IDの一覧として状態に持たせ、全科目ページはそれで数える。
    持っていない科目だけ教材を読んで作り、以後は使い回す。 */
-function stSig(st){ return (st.pool||'mon')+'|'+(st.rank||'AB')+'|'+(st.hot?1:0); }
+var HOTSHARE=0.85;
+/* プールの中身が変わる要因をすべて入れる。ここに入れ忘れたものは、
+   設定を変えていない限り作り直されず、古い肢IDが使われ続ける。
+   しきい値と教材のバージョンを落としていたのが v32 までの不具合。 */
+function stSig(st,ver){ return (st.pool||'mon')+'|'+(st.rank||'AB')+'|'+(st.hot?1:0)
+  +'|h'+HOTSHARE+'|'+(ver||''); }
 function poolIdsFor(d,st){
   var cards=d.cards||[], tops=d.topics||[], pls=(d.meta&&d.meta.pools)||[];
   var pid=st.pool||'mon', rank=st.rank||'AB', pl=null, i;
@@ -342,7 +348,7 @@ function scanSubjects(){
   return Promise.all(a.map(function(sg){
     return Store.get('trainer_state_'+sg).then(function(v){
       var st={}; try{ st=JSON.parse(v||'{}'); }catch(e){}
-      var sig=stSig(st);
+      var sig=stSig(st,(getSummary(sg)||{}).v);
       if(st.pids&&st.psig===sig) return tally(sg,st,st.pids,t);
       /* いま開いている科目は save() 側が書くので、ここでは保存しない */
       var open=(typeof M!=='undefined'&&M&&M.sig===sg);
@@ -364,7 +370,7 @@ function saveSummary(){
     var kk=c.k||0; if(!h[kk]) h[kk]=[0,0,0]; h[kk][i]++;
     if(kk===0) h.m[i]++; else if(kk===1) h.k[i]++; });
   try{ lset(sumKey(M.sig), JSON.stringify({title:M.title,n:CARDS.length,t:TOPICS.length,v:DVER,h:h,
-    pools:(M.pools||[]).map(function(p){ return {id:p.id,k:p.k||null,rk:p.rk||null}; })})); }catch(e){}
+    pools:(M.pools||[]).map(function(p){ return {id:p.id,label:p.label||p.id,k:p.k||null,rk:p.rk||null}; })})); }catch(e){}
 }
 function getSummary(sig){ try{ return JSON.parse(lget(sumKey(sig))||'null'); }catch(e){ return null; } }
 var POOLNM={mon:'短答対策',kako:'過年度本試験',dan:'直前答練',all:'全部'};
@@ -589,7 +595,7 @@ function load(){ return Store.get(KEY).then(function(v){
 }); }
 function syncPool(){
   if(!CARDS||!CARDS.length) return;
-  var sig=stSig(S);
+  var sig=stSig(S,DVER);
   if(S.psig===sig&&S.pids) return;
   S.pids=poolCards().map(function(c){ return c.i; }); S.psig=sig;
 }
@@ -634,7 +640,6 @@ function poolCount(id){ var ks=poolKs(id), rk=poolRk(id);
     return rk?rankMatch(rkOf(id,c),c):true; }).length; }
 function rankOk(c){ var v=rkOf(S.pool,c); return rankMatch(v||S.rank,c); }
 var _hot=null;
-var HOTSHARE=0.85;
 /* 出題実績の重みが大きい順に、累計が HOTSHARE に届くまでを「よく出る論点」とする。
    足切りとちょうど同じ重みの論点は、配列の並び順で採否が決まってしまわないよう全部入れる。 */
 function hotFrom(tops){
