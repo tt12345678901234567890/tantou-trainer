@@ -201,8 +201,10 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v33', APPDATE='2026-10-19';
+var APPVER='v35', APPDATE='2026-10-20';
 var CHANGES=[
+ ['v35','2026-10-20','「今日の◯分の使い方」の残りが、実際に使った時間と食い違っていたのを修正。残りを肢数の引き算で出していたため、その日のペースが見積もりより遅いと「30分の使い方」の中身が8分ぶんしかない、といったことが起きていた。今日すでに使った時間から残りを出すようにし、見出しに「のこり◯分」を出す。すでに「よく出る論点だけ」にしている科目に、範囲を絞れという助言を出さないようにした'],
+ ['v34','2026-10-20','「最新に更新する」や再読み込みのあと、科目のホームに戻ってしまっていたのを、開いていた画面（全科目・記録・弱点・論点を選ぶ・直前チェック）に戻るようにした。出題中だった場合は、これまでどおりホームに戻って「続きから」が出る'],
  ['v33','2026-10-19','v31で入れた「出題プールの肢IDを覚えておく仕組み」が、しきい値と教材バージョンの変化を見ていなかった不具合を修正。v32でしきい値を85%に広げても、設定を触っていない科目は80%当時の肢数のまま表示されていた（教材ファイルを入れ替えたときも同じ）。あわせて要約にプール名を入れ、毎回作り直されないようにした'],
  ['v32','2026-10-18','「よく出る論点だけ」の線引きを、出題実績の重みの上位80%から85%に広げ、足切りとちょうど同じ重みの論点はすべて入れるようにした。同点の採否が論点の並び順で決まっていたのと、出題実績データに取りこぼしがあったときに境界の論点が落ちるのを防ぐため。4科目あわせて2,792肢→3,075肢'],
  ['v31','2026-10-18','全科目ページとエクスポートの母数がそろっていなかったのを修正。プール肢数・戻り肢・周回の進捗・正答率が「使う教材／出題するランク／出す範囲」を無視して数えられていたため、「よく出る論点だけ」にしている科目で実際より大きい数字が出ていた（戻り肢がプール肢数を超えることもあった）。科目ごとに出題プールの肢IDを持たせて数えるようにした'],
@@ -730,9 +732,17 @@ function dayPlan(){
   var cy=Math.max(0,q-rev);
   var lg=S.log[today()]||{};
   var dw=lg.nw||0, dr=Math.max(0,(lg.n||0)-dw);
+  /* 残りは「今日すでに使った時間」から出す。肢数の引き算だと、
+     その日の実際のペースが見積もりとずれたときに、
+     持ち時間30分なのに「残り8分」のような食い違いが出る。 */
+  var used=lg.s||0;
+  var leftSec=Math.max(0,T*60-used);
+  var qL=Math.floor(leftSec/sp);
+  var revL=Math.min(R,Math.round(qL*p));
+  var cycL=Math.max(0,qL-revL);
   var tot=cycState().total;
   return {min:T,auto:auto,q:q,rev:rev,cyc:cy,
-          revLeft:Math.max(0,rev-dr),cycLeft:Math.max(0,cy-dw),
+          revLeft:revL,cycLeft:cycL,leftMin:Math.round(leftSec/60),usedMin:Math.round(used/60),
           doneRev:dr,doneCyc:dw,R:R,C:C,sp:sp,
           days:(tot&&cy)?Math.ceil(tot/cy):null};   /* このペースなら1周に何日か */
 }
@@ -1309,7 +1319,10 @@ function nextHtml(){
   TMIN.forEach(function(n){
     h+='<button data-tmin="'+n+'" class="'+(!P.auto&&S.tmin===n?'on':'')+'">'+n+'分</button>'; });
   h+='</div>';
-  h+='<div class="na"><b>今日の'+P.min+'分の使い方</b>';
+  var head='今日の'+P.min+'分';
+  if(P.usedMin>0) head+=P.leftMin>0?('　のこり'+P.leftMin+'分'):'　使い切りました';
+  else head+='の使い方';
+  h+='<div class="na"><b>'+head+'</b>';
   if(P.revLeft>0)
     h+='<button class="r" data-go="rev"><i>①</i><u>復習だけ</u><s>'+mins(P.revLeft)+'分 / '+P.revLeft+'肢</s></button>';
   else if(P.R)
@@ -1321,12 +1334,14 @@ function nextHtml(){
   var ft=[];
   if(P.R) ft.push('戻り肢 '+P.R+'肢');
   if(P.days) ft.push('このペースで1周'+P.days+'日（設定'+cyc()+'日）');
-  if(P.doneRev+P.doneCyc) ft.push('今日'+(P.doneRev+P.doneCyc)+'肢');
+  if(P.usedMin||P.doneRev+P.doneCyc) ft.push('今日 '+P.usedMin+'分・'+(P.doneRev+P.doneCyc)+'肢');
   if(ft.length) h+='<div class="ft"><span>'+ft.join('</span>　／　<span>')+'</span></div>';
   h+='</div>';
   if(P.R&&P.days&&P.days>cyc()*1.6)
-    h+='<div class="note">1周が設定より大きく延びています。持ち時間を増やすか、'+
-       '「よく出る論点だけ」で範囲を絞ってください。戻り肢を先に崩すほうが点になります。</div>';
+    h+='<div class="note">1周が設定より大きく延びています。'+(S.hot
+      ?'範囲はすでに絞ってあるので、持ち時間を増やすしかありません。'
+      :'持ち時間を増やすか、「よく出る論点だけ」で範囲を絞ってください。')+
+      '1周の遅れより、戻り肢を先に崩すほうが点になります。</div>';
   return h;
 }
 function paceHtml(){
@@ -1956,8 +1971,14 @@ function nav(cur){
 }
 
 /* ============ ルーティング ============ */
+/* 更新や再読み込みのあとも、開いていた画面に戻る。
+   出題中（card/finish）と読み込み画面は、状態が戻せないので対象外。 */
+var VKEEP={home:1,all:1,dash:1,weak:1,pick:1,cz:1};
+function keepView(){ try{ if(VKEEP[view]) lset('trainer_view',view); }catch(e){} }
+function lastView(){ var v=lget('trainer_view'); return VKEEP[v]?v:'home'; }
 function render(){
   var el=document.getElementById('app'), h='';
+  keepView();
   /* 出題中はさわらない。ホームなどを開いたときだけ周を切り替える */
   if(view!=='card'&&view!=='finish'&&view!=='load') maybeNextRound();
   if(view==='load') h=vLoad();
@@ -2210,7 +2231,7 @@ probe()
       if(!ok){ view='load'; render(); return; }
       lset('trainer_last',want);
       brand(want);
-      return load().then(scanSubjects).then(function(){ view='home'; render(); });
+      return load().then(scanSubjects).then(function(){ view=lastView(); render(); });
     });
  })
  .then(null,function(){ view='load'; render(); });
