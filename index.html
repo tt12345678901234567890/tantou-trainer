@@ -201,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v36', APPDATE='2026-10-21';
+var APPVER='v37', APPDATE='2026-10-21';
 var CHANGES=[
+ ['v37','2026-10-21','「復習だけ」をやり切っても、残り時間がまた復習と周回に割り直されていたのを修正（v35で時間基準にしたときに、その日やったぶんを引く処理が抜けていた）。今日の枠を使い切った側は「今日のぶんは済み」になり、余った時間はもう片方にまわる。①＋②が残り時間と一致する点はそのまま'],
  ['v36','2026-10-21','記録や日次に出る日付が1日前になっていたのを修正。日付番号をそのまま日時に戻していたため、日本時間では時差のぶん前日の日付と曜日が表示されていた（10/21の学習が10/20として並ぶ）。復習の予定日や周回の数え方は同じ番号で一貫して計算していたので、学習記録そのものには影響していない'],
  ['v35','2026-10-20','「今日の◯分の使い方」の残りが、実際に使った時間と食い違っていたのを修正。残りを肢数の引き算で出していたため、その日のペースが見積もりより遅いと「30分の使い方」の中身が8分ぶんしかない、といったことが起きていた。今日すでに使った時間から残りを出すようにし、見出しに「のこり◯分」を出す。すでに「よく出る論点だけ」にしている科目に、範囲を絞れという助言を出さないようにした'],
  ['v34','2026-10-20','「最新に更新する」や再読み込みのあと、科目のホームに戻ってしまっていたのを、開いていた画面（全科目・記録・弱点・論点を選ぶ・直前チェック）に戻るようにした。出題中だった場合は、これまでどおりホームに戻って「続きから」が出る'],
@@ -739,8 +740,18 @@ function dayPlan(){
   var used=lg.s||0;
   var leftSec=Math.max(0,T*60-used);
   var qL=Math.floor(leftSec/sp);
-  var revL=Math.min(R,Math.round(qL*p));
-  var cycL=Math.max(0,qL-revL);
+  /* その日の枠から、すでにやったぶんを引く。
+     ①をやり切ったら①は0になり、余った時間は②にまわる。
+     残り時間のほうが少なければ、比率を保って両方を縮める。 */
+  var revL=Math.max(0,rev-dr), cycL=Math.max(0,cy-dw), sum=revL+cycL;
+  if(sum>qL){
+    revL=Math.round(qL*(sum?revL/sum:0)); cycL=Math.max(0,qL-revL);
+  }else if(qL>sum){
+    var ex=qL-sum;
+    if(cycL>0||C>0) cycL+=ex;      /* 周回の枠が残っている／この周にまだ肢がある */
+    else revL+=ex;                 /* この周は出し切った。戻り肢にまわす */
+  }
+  if(revL>R){ cycL+=revL-R; revL=R; }
   var tot=cycState().total;
   return {min:T,auto:auto,q:q,rev:rev,cyc:cy,
           revLeft:revL,cycLeft:cycL,leftMin:Math.round(leftSec/60),usedMin:Math.round(used/60),
