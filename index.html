@@ -201,8 +201,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v38', APPDATE='2026-10-22';
+var APPVER='v39', APPDATE='2026-10-22';
 var CHANGES=[
+ ['v39','2026-10-22','v38の修正が効いていなかったのを直した（動作中のセッションの持ち物の名前を読み違えていて、判定が従来どおりに落ちていた）。あわせて、その日の枠を朝いちばんで決めて固定するようにした。解くたびに戻り肢の数と1肢あたりの秒数が動くため枠が計算し直され、やり切っても少しだけ残ることがあった。日が変わるか、持ち時間か出題の設定を変えたときだけ引き直す'],
  ['v38','2026-10-22','「復習だけ」をやり切っても復習の枠が減りきらなかった不具合を修正。今日の枠のどちらを使ったかを「押したボタン」ではなく「その周で初めて出た肢かどうか」で判定していたため、復習で出した肢でもその周に未登場なら周回の枠から引かれていた（周が明けた直後ほどずれが大きい）。周回の進み具合の数え方は変えていないので、進捗や1周の日数には影響しない'],
  ['v37','2026-10-21','「復習だけ」をやり切っても、残り時間がまた復習と周回に割り直されていたのを修正（v35で時間基準にしたときに、その日やったぶんを引く処理が抜けていた）。今日の枠を使い切った側は「今日のぶんは済み」になり、余った時間はもう片方にまわる。①＋②が残り時間と一致する点はそのまま'],
  ['v36','2026-10-21','記録や日次に出る日付が1日前になっていたのを修正。日付番号をそのまま日時に戻していたため、日本時間では時差のぶん前日の日付と曜日が表示されていた（10/21の学習が10/20として並ぶ）。復習の予定日や周回の数え方は同じ番号で一貫して計算していたので、学習記録そのものには影響していない'],
@@ -586,7 +587,7 @@ function migrateBackup(o){
   return f;
 }
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
-  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
+  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},plan:null,examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
 S=fresh();
 function today(){ var d=new Date(); d.setHours(0,0,0,0); return Math.floor(d.getTime()/864e5); }
 function cyc(){ return S.cyc||7; }
@@ -727,12 +728,21 @@ function dayPlan(){
   var C=restOfRound();               /* この周でまだ出していない肢 */
   var auto=(S.tmin==null);
   var T=auto?Math.max(5,Math.round(cap()*sp/60)):S.tmin;
-  var q=Math.max(1,Math.floor(T*60/sp));           /* 今日ぜんぶで何肢やれるか */
-  var p=(R+C)?R/(R+C):0;
-  p=Math.min(0.8,Math.max(0.4,p));
-  if(!R) p=0;
-  var rev=Math.min(R,Math.round(q*p));
-  var cy=Math.max(0,q-rev);
+  /* その日の枠は一度決めたら固定する。解くたびに戻り肢の数も1肢あたりの秒数も
+     動くので、毎回決め直すと「やり切ったのに少しだけ残る」が起きる。
+     日が変わる・持ち時間を変える・出題の設定を変えたときだけ引き直す。 */
+  var sig=stSig(S,DVER), pl=S.plan;
+  if(!pl||pl.d!==today()||pl.T!==T||pl.sig!==sig){
+    var q0=Math.max(1,Math.floor(T*60/sp));
+    var p0=(R+C)?R/(R+C):0;
+    p0=Math.min(0.8,Math.max(0.4,p0));
+    if(!R) p0=0;
+    var rv=Math.min(R,Math.round(q0*p0));
+    pl={d:today(),T:T,sig:sig,q:q0,rev:rv,cyc:Math.max(0,q0-rv)};
+    S.plan=pl; save();
+  }
+  var q=pl.q, rev=pl.rev, cy=pl.cyc;
+  var p=q?rev/q:0;
   var lg=S.log[today()]||{};
   var dw=lg.nw||0, dr=Math.max(0,(lg.n||0)-dw);
   /* 残りは「今日すでに使った時間」から出す。肢数の引き算だと、
@@ -897,7 +907,7 @@ function grade(id,good){
      「この周で初めて出た肢か」で決めていたころは、「復習だけ」で出した肢でも
      その周に未登場なら周回の枠から引かれ、復習の枠がいつまでも減らなかった。
      周回そのものの進み具合は markSeen（cycSeen）で別に数えているので影響しない。 */
-  var md=(ses&&ses.m)||'';
+  var md=(ses&&ses.mode)||'';
   if(md?(md==='today'||md==='half'||md==='one'||md==='more'):fresh_)
     lg.nw=(lg.nw||0)+1;
   S.log[t]=lg;
