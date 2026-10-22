@@ -110,6 +110,10 @@ button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer
 .na .ft{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:var(--sub);font-size:11.5px}
 .na .ft span{white-space:nowrap}
 .na.q{border-color:var(--line)}
+.hdr{display:flex;align-items:baseline;gap:12px}
+.cd{font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums;letter-spacing:.02em;padding:2px 0}
+.cd.over{color:var(--hold)}
+.cd.off{opacity:.4}
 .bdg{display:inline-block;min-width:15px;padding:0 4px;margin-left:5px;border-radius:7px;
   background:var(--line);color:var(--sub);font-size:9.5px;line-height:15px;font-weight:600}
 .bdg.idle{background:none;color:var(--hold);box-shadow:inset 0 0 0 1px var(--hold)}
@@ -201,8 +205,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v39', APPDATE='2026-10-22';
+var APPVER='v40', APPDATE='2026-10-22';
 var CHANGES=[
+ ['v40','2026-10-22','問題画面に目安タイマーを追加。「復習だけ」なら①の分、「今日のぶん」なら②の分を、始めた時点で固定して数えます。0になっても何も起きず、そのまま続けられます（超えたぶんは＋表示）。タイマーを押すと隠れ、代わりに出る時計の印を押すと戻ります。設定は覚えます'],
  ['v39','2026-10-22','v38の修正が効いていなかったのを直した（動作中のセッションの持ち物の名前を読み違えていて、判定が従来どおりに落ちていた）。あわせて、その日の枠を朝いちばんで決めて固定するようにした。解くたびに戻り肢の数と1肢あたりの秒数が動くため枠が計算し直され、やり切っても少しだけ残ることがあった。日が変わるか、持ち時間か出題の設定を変えたときだけ引き直す'],
  ['v38','2026-10-22','「復習だけ」をやり切っても復習の枠が減りきらなかった不具合を修正。今日の枠のどちらを使ったかを「押したボタン」ではなく「その周で初めて出た肢かどうか」で判定していたため、復習で出した肢でもその周に未登場なら周回の枠から引かれていた（周が明けた直後ほどずれが大きい）。周回の進み具合の数え方は変えていないので、進捗や1周の日数には影響しない'],
  ['v37','2026-10-21','「復習だけ」をやり切っても、残り時間がまた復習と周回に割り直されていたのを修正（v35で時間基準にしたときに、その日やったぶんを引く処理が抜けていた）。今日の枠を使い切った側は「今日のぶんは済み」になり、余った時間はもう片方にまわる。①＋②が残り時間と一致する点はそのまま'],
@@ -587,7 +592,7 @@ function migrateBackup(o){
   return f;
 }
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
-  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},plan:null,examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
+  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},plan:null,cd:1,examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
 S=fresh();
 function today(){ var d=new Date(); d.setHours(0,0,0,0); return Math.floor(d.getTime()/864e5); }
 function cyc(){ return S.cyc||7; }
@@ -879,17 +884,19 @@ function startSession(mode,arg){
     q=wpick(pool,Math.min(25,pool.length)); }
   if(!q.length){ toast('出す肢がありません'); return; }
   ses={mode:mode,arg:arg,queue:q,i:0,graded:false,pick:null,ok:0,ng:0,miss:[],
-       t0:Date.now(),sec:0,rstart:undefined,kan:0};
+       t0:Date.now(),sec:0,rstart:undefined,kan:0,goal:0};
+  ses.goal=goalSec(mode,q.length);
   tmp={}; view='card'; saveSes(); render();
 }
 function saveSes(){ if(!ses){S.ses=null;save();return;}
   S.ses={m:ses.mode,arg:ses.arg,q:ses.queue.map(function(c){return c.i;}),i:ses.i,
-    ok:ses.ok,ng:ses.ng,miss:ses.miss,sec:ses.sec,rstart:ses.rstart,kan:ses.kan}; save(); }
+    ok:ses.ok,ng:ses.ng,miss:ses.miss,sec:ses.sec,rstart:ses.rstart,kan:ses.kan,
+    goal:ses.goal}; save(); }
 function resumable(){ var r=S.ses; if(!r||!r.q||r.i>=r.q.length) return null; return r; }
 function resumeSession(){ var r=S.ses; if(!r) return;
   ses={mode:r.m,arg:r.arg,queue:r.q.map(function(i){return BYID[i];}).filter(Boolean),
     i:r.i,graded:false,pick:null,ok:r.ok||0,ng:r.ng||0,miss:r.miss||[],t0:Date.now(),
-    sec:r.sec||0,rstart:r.rstart,kan:r.kan||0};
+    sec:r.sec||0,rstart:r.rstart,kan:r.kan||0,goal:r.goal||0};
   tmp={}; view='card'; render(); }
 function isRetry(){ return ses&&ses.rstart!==undefined&&ses.i>=ses.rstart; }
 
@@ -912,6 +919,37 @@ function grade(id,good){
     lg.nw=(lg.nw||0)+1;
   S.log[t]=lg;
   save();
+}
+/* 問題画面の目安タイマー。
+   「復習だけ」なら①の分、「今日のぶん」なら②の分を、始めた時点で固定して数える。
+   0 になっても何も起きない。あくまで目安。 */
+function goalSec(mode,qlen){
+  var P=dayPlan();
+  var n=(mode==='today'||mode==='half'||mode==='one'||mode==='more')?P.cycLeft:P.revLeft;
+  if(!n) n=qlen||0;                 /* 枠を使い切ってから始めたときは、出た肢数で */
+  return n?mins(n)*60:0;
+}
+function cdLeft(){
+  if(!ses||!ses.goal) return null;
+  var live=Math.max(0,Math.min(TICKMAX,Math.round((Date.now()-ses.t0)/1000)));
+  return ses.goal-(ses.sec+live);
+}
+function cdText(){
+  var r=cdLeft(); if(r===null) return '';
+  var a=Math.abs(r), m=Math.floor(a/60), ss=a%60;
+  return (r<0?'＋':'')+m+':'+(ss<10?'0':'')+ss;
+}
+function cdHtml(){
+  if(!ses||!ses.goal) return '';
+  if(!S.cd) return '<button class="cd off" data-cd="1" title="目安タイマーを出す">⏱</button>';
+  var r=cdLeft();
+  return '<button class="cd'+(r<0?' over':'')+'" id="cd" data-cd="0" '+
+         'title="押すと隠れます">'+cdText()+'</button>';
+}
+function paintCd(){
+  if(view!=='card'||!ses||!S.cd) return;
+  var e=document.getElementById('cd'); if(!e) return;
+  var r=cdLeft(); e.textContent=cdText(); e.className='cd'+(r<0?' over':'');
 }
 var prevView=null;
 var TICKMAX=10;   /* 5秒ごとに数えている。これを超える間隔は画面を離れていたとみなす */
@@ -1446,7 +1484,8 @@ function vCard(){
   var c=ses.queue[ses.i], L=S.L[c.i], t=TP[c.t], rt=isRetry();
   var h='<div class="hd"><div class="sub">'+(ses.i+1)+' / '+ses.queue.length+' ・ '+
     (rt?'おさらい':(MODES[ses.mode]?MODES[ses.mode].nm:'論点'))+'</div>'+
-    '<button class="sub" data-go="home" style="font-size:12px">中断</button></div><div class="rule"></div>';
+    '<div class="hdr">'+cdHtml()+
+    '<button class="sub" data-go="home" style="font-size:12px">中断</button></div></div><div class="rule"></div>';
   h+='<div class="qwrap"><div class="tag"><span class="rk '+c.r+'">'+c.r+'</span>'+
     '<span>'+esc(t?t.n:'')+'</span>'+
     (rt?'<span class="again">もう一度</span>':'')+
@@ -2189,6 +2228,7 @@ document.addEventListener('click',function(e){
       return;
     }
   }
+  if(d.cd!==undefined){ S.cd=+d.cd; save(); render(); return; }
   if(d.treset){ if(confirm('学習時間の記録だけを消します。解いた記録は残ります。よろしいですか？')){
       for(var lk in S.log) S.log[lk].s=0; if(ses) ses.sec=0; save(); toast('時間の記録を消しました'); render(); } return; }
   if(d.reset){ if(confirm('学習記録を全部消します。よろしいですか？')){ S=fresh(); S.cycStart=today(); save(); toast('消しました'); render(); } return; }
@@ -2214,6 +2254,7 @@ if(typeof window!=='undefined'&&window.addEventListener){
   window.addEventListener('pageshow',resume);
 }
 setInterval(function(){ if(view==='card'&&ses&&!document.hidden) tick(); },5000);
+setInterval(paintCd,1000);
 function migrate(){
   /* 旧バージョン（1科目だけを1か所に置いていた頃）からの引き継ぎ */
   if(subjects().length) return Promise.resolve();
