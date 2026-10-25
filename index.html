@@ -170,6 +170,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 .spkin{border:1px solid var(--line);background:var(--card);color:var(--sub);
   border-radius:20px;padding:3px 10px;font-size:11px;margin-left:auto;white-space:nowrap}
 .spkin.off{opacity:.65}
+.flg{border:1px solid var(--line);background:var(--card);color:var(--sub);
+  border-radius:20px;padding:3px 10px;font-size:11px;white-space:nowrap}
+.flg.on{background:var(--hold);border-color:var(--hold);color:var(--paper);font-weight:600}
 .wk{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);
   font-size:12.5px;width:100%;text-align:left}
 .wk .hz{flex:0 0 46px;font-size:10px;color:var(--paper);background:var(--sub);border-radius:3px;
@@ -205,8 +208,11 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v40', APPDATE='2026-10-22';
+var APPVER='v43', APPDATE='2026-10-25';
 var CHANGES=[
+ ['v43','2026-10-25','問題に「後で確認」の印を付けられるようにした。問題文の上のボタンで、問題を解いている最中でも解説を読んでいる最中でも押せる。もう一度押すとはずれる。付けた肢はホームの「後で確認」からまとめて回せる。メモのある肢と同じ扱いで、今日の枠では復習のほうから引く'],
+ ['v42','2026-10-23','「使う教材」を小さいタブ（直前答練など）に切り替えた瞬間に1周完了とみなされ、周回の記録が丸ごと消えていた不具合を修正。押し間違いでも起きる。周を終えたときに消すのは、いま出題しているプールの肢だけにし、別のタブで進めた記録は残すようにした。あわせて、出題の設定を変えた直後は周を終えたとみなさないようにした。学習記録・正答率・復習の予定日は従来から影響を受けない'],
+ ['v41','2026-10-23','今日の学習時間が、上の棒グラフと「今日の◯分」のカードで1分ちがうことがあったのを修正。棒グラフは切り捨て、カードは四捨五入だったため、29分50秒が29分と30分の両方で出ていた。切り捨てにそろえた。「使い切りました」の判定も、分数ではなく、のこり時間で1肢でも出せるかどうかで決めるようにした'],
  ['v40','2026-10-22','問題画面に目安タイマーを追加。「復習だけ」なら①の分、「今日のぶん」なら②の分を、始めた時点で固定して数えます。0になっても何も起きず、そのまま続けられます（超えたぶんは＋表示）。タイマーを押すと隠れ、代わりに出る時計の印を押すと戻ります。設定は覚えます'],
  ['v39','2026-10-22','v38の修正が効いていなかったのを直した（動作中のセッションの持ち物の名前を読み違えていて、判定が従来どおりに落ちていた）。あわせて、その日の枠を朝いちばんで決めて固定するようにした。解くたびに戻り肢の数と1肢あたりの秒数が動くため枠が計算し直され、やり切っても少しだけ残ることがあった。日が変わるか、持ち時間か出題の設定を変えたときだけ引き直す'],
  ['v38','2026-10-22','「復習だけ」をやり切っても復習の枠が減りきらなかった不具合を修正。今日の枠のどちらを使ったかを「押したボタン」ではなく「その周で初めて出た肢かどうか」で判定していたため、復習で出した肢でもその周に未登場なら周回の枠から引かれていた（周が明けた直後ほどずれが大きい）。周回の進み具合の数え方は変えていないので、進捗や1周の日数には影響しない'],
@@ -592,7 +598,7 @@ function migrateBackup(o){
   return f;
 }
 function fresh(){ return {L:{},log:{},rank:'AB',mix:'freq',pool:'mon',rt:'on',ses:null,cyc:7,
-  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,N:{},plan:null,cd:1,examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
+  cycStart:null,cycFirst:null,cycSeen:{},rounds:0,cycSig:null,N:{},F:{},plan:null,cd:1,examStr:null,tts:0,ttsRate:1.05,s2dis:0,hot:0,tmin:null,ver:1}; }
 S=fresh();
 function today(){ var d=new Date(); d.setHours(0,0,0,0); return Math.floor(d.getTime()/864e5); }
 function cyc(){ return S.cyc||7; }
@@ -770,7 +776,11 @@ function dayPlan(){
   if(revL>R){ cycL+=revL-R; revL=R; }
   var tot=cycState().total;
   return {min:T,auto:auto,q:q,rev:rev,cyc:cy,
-          revLeft:revL,cycLeft:cycL,leftMin:Math.round(leftSec/60),usedMin:Math.round(used/60),
+          revLeft:revL,cycLeft:cycL,leftMin:Math.round(leftSec/60),leftQ:qL,
+          /* 「今日」の分数は棒グラフ（fmt）と同じ切り捨てにそろえる。
+             こちらだけ四捨五入していたので、29分50秒が棒グラフでは29分、
+             カードでは30分と出て食い違っていた。 */
+          usedMin:Math.floor(used/60),
           doneRev:dr,doneCyc:dw,R:R,C:C,sp:sp,
           days:(tot&&cy)?Math.ceil(tot/cy):null};   /* このペースなら1周に何日か */
 }
@@ -801,7 +811,8 @@ function guideDays(){ return S.rank==='A'?5:(S.rank==='AB'?7:10); }
 var MODES={
   today:{nm:'今日のぶん'}, half:{nm:'半分だけ'}, one:{nm:'1分だけ'},
   rev:{nm:'復習だけ'}, more:{nm:'もう少し'}, topic:{nm:'論点'},
-  weak:{nm:'弱点つぶし'}, cz:{nm:'直前チェック'}, note:{nm:'メモのある肢'}, must:{nm:'落とせない肢'}
+  weak:{nm:'弱点つぶし'}, cz:{nm:'直前チェック'}, note:{nm:'メモのある肢'}, must:{nm:'落とせない肢'},
+  flag:{nm:'後で確認'}
 };
 function planLists(total,opt){
   opt=opt||{}; var t=today();
@@ -830,6 +841,12 @@ function planLists(total,opt){
   }
   return shuf(pick(neu,total)).slice(0,total);
 }
+/* 「後で確認」を付けた肢。教材を入れ替えても、無くなった肢は黙って落とす */
+function flagged(){
+  var o=[],k;
+  for(k in (S.F||{})) if(S.F[k]&&BYID[k]) o.push(BYID[k]);
+  return o;
+}
 function restOfRound(){
   var n=0;
   poolCards().forEach(function(c){ if(!S.cycSeen[c.i]) n++; });
@@ -844,7 +861,13 @@ function moreN(){
 }
 function nextRound(){
   S.rounds=(S.rounds||0)+1;
-  S.cycStart=today(); S.cycFirst=null; S.cycSeen={};
+  S.cycStart=today(); S.cycFirst=null; S.cycSig=stSig(S,DVER);
+  /* 消すのは、いま出題しているプールに入っている肢だけ。
+     以前は丸ごと消していたので、「使う教材」を小さいタブ（直前答練など）に
+     切り替えた瞬間に1周完了とみなされ、問題集側で進めた周回の記録まで失われた。 */
+  var keep={};
+  for(var k in S.cycSeen){ var c=BYID[k]; if(!c||!inPool(c)) keep[k]=1; }
+  S.cycSeen=keep;
   save();
 }
 /* この周をすべて解き終わっていたら、次の周に入れる。
@@ -852,6 +875,10 @@ function nextRound(){
 function maybeNextRound(){
   if(!CARDS.length||!S||!S.cycSeen) return false;
   var total=poolTotal(); if(!total) return false;
+  /* 出題の設定を変えた直後は、周を終えたとみなさない。
+     タブを押し間違えただけで周が進んでしまうのを防ぐ。 */
+  var sig=stSig(S,DVER);
+  if(S.cycSig!==sig){ S.cycSig=sig; save(); return false; }
   var seen=0;
   for(var k in S.cycSeen){ var c=BYID[k]; if(c&&inPool(c)) seen++; }
   if(seen<total) return false;
@@ -877,6 +904,7 @@ function startSession(mode,arg){
   else if(mode==='topic') q=shuf(BYTP[arg]||[]).filter(poolOk).slice(0,30);
   else if(mode==='note'){ var ids=Object.keys(S.N||{}).filter(function(k){return S.N[k];});
     q=shuf(ids.map(function(i){return BYID[i];}).filter(Boolean)).slice(0,30); }
+  else if(mode==='flag'){ q=shuf(flagged()).slice(0,30); }
   else if(mode==='weak'){ q=weakCards().slice(0,20); }
   else if(mode==='must'){ q=shuf(CARDS.filter(function(c){ return c.k&&c.mk==='◎'; })).slice(0,20); }
   else if(mode==='cz'){ var tt=[]; CZ.forEach(function(x){ if(x.id===arg) tt=x.topics||[]; }); var pool=[];
@@ -1309,6 +1337,8 @@ function vHome(){
   if(wc) h+='<button class="mode" data-go="weak"><b>弱点つぶし</b><span>外した回数×出題頻度で並べた上位20肢。伸びしろが大きい順</span></button>';
   var nn=0; for(var kk in (S.N||{})) if(S.N[kk]) nn++;
   if(nn) h+='<button class="mode" data-go="note"><b>メモのある肢</b><span>'+nn+'肢。自分で書き足した分だけ回す</span></button>';
+  var fn=flagged().length;
+  if(fn) h+='<button class="mode" data-go="flag"><b>後で確認</b><span>'+fn+'肢。あとで見返すと決めた分だけ回す</span></button>';
   var mn=moreN(), rest=restOfRound();
   if(mn)
     h+='<button class="mode" data-go="more"'+(bd<=0?' style="border-color:var(--ao)"':'')+
@@ -1387,7 +1417,10 @@ function nextHtml(){
     h+='<button data-tmin="'+n+'" class="'+(!P.auto&&S.tmin===n?'on':'')+'">'+n+'分</button>'; });
   h+='</div>';
   var head='今日の'+P.min+'分';
-  if(P.usedMin>0) head+=P.leftMin>0?('　のこり'+P.leftMin+'分'):'　使い切りました';
+  /* 「使い切った」かどうかは分数ではなく、のこり時間で1肢でも出せるかで決める。
+     切り捨てにそろえた結果、のこり0分と出ることがあるため。 */
+  if(P.usedMin>0||P.doneRev+P.doneCyc>0)
+    head+=P.leftQ>0?('　のこり'+Math.max(1,P.leftMin)+'分'):'　使い切りました';
   else head+='の使い方';
   h+='<div class="na"><b>'+head+'</b>';
   if(P.revLeft>0)
@@ -1495,7 +1528,9 @@ function vCard(){
     (c.k&&c.mk==='◎'?'<span class="hot">落とせない</span>':'')+
     (c.k&&c.ac!=null?'<span>正答率'+c.ac+'%</span>':'')+
     (sute(c)?'<span class="sute">深追い不要</span>':'')+
-    (window.speechSynthesis?'<button class="spkin'+(S.tts?'':' off')+'" data-say="q">🔊 読み上げ</button>':'')+
+    '<button class="flg'+((S.F||{})[c.i]?' on':'')+'" data-flag="1" '+
+      'style="margin-left:auto">'+((S.F||{})[c.i]?'✓ 後で確認':'後で確認')+'</button>'+
+    (window.speechSynthesis?'<button class="spkin'+(S.tts?'':' off')+'" data-say="q" style="margin-left:0">🔊 読み上げ</button>':'')+
     '</div>';
   h+='<div class="q"><span class="qn">'+esc(c.L)+'</span>'+esc(c.q)+'</div></div>';
 
@@ -2227,6 +2262,11 @@ document.addEventListener('click',function(e){
       }catch(e){ done(); }
       return;
     }
+  }
+  if(d.flag&&ses&&ses.queue[ses.i]){
+    var fid=ses.queue[ses.i].i; S.F=S.F||{};
+    if(S.F[fid]){ delete S.F[fid]; toast('はずしました'); } else { S.F[fid]=1; toast('後で確認に入れました'); }
+    save(); render(); return;
   }
   if(d.cd!==undefined){ S.cd=+d.cd; save(); render(); return; }
   if(d.treset){ if(confirm('学習時間の記録だけを消します。解いた記録は残ります。よろしいですか？')){
