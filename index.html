@@ -173,6 +173,12 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 .flg{border:1px solid var(--line);background:var(--card);color:var(--sub);
   border-radius:20px;padding:3px 10px;font-size:11px;white-space:nowrap}
 .flg.on{background:var(--hold);border-color:var(--hold);color:var(--paper);font-weight:600}
+.cfgbar{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);
+  border-radius:10px;padding:10px 12px;font-size:11.5px;color:var(--sub);line-height:1.6}
+.cfgbar span{flex:1}
+.cfgbar b{display:block;color:var(--ink);font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums}
+.cfgbar button{border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:12px;
+  background:var(--paper);white-space:nowrap}
 .wk{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);
   font-size:12.5px;width:100%;text-align:left}
 .wk .hz{flex:0 0 46px;font-size:10px;color:var(--paper);background:var(--sub);border-radius:3px;
@@ -208,8 +214,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v43', APPDATE='2026-10-25';
+var APPVER='v44', APPDATE='2026-10-27';
 var CHANGES=[
+ ['v44','2026-10-27','出題の設定（使う教材・ランク・出す範囲・かたより・1周する日数）を、ふだんは1行にたたむようにした。スクロールのたびに指が当たる位置にボタンが並んでいて、押し間違いが起きていたため。たたんだ行にはいまの設定と肢数が出るので、変わっていればその場で気づける。「変える」を押したときだけ開き、ホームを離れると自動で閉じる。設定を変えたときは、何がどう変わったかを必ず知らせるようにした'],
  ['v43','2026-10-25','問題に「後で確認」の印を付けられるようにした。問題文の上のボタンで、問題を解いている最中でも解説を読んでいる最中でも押せる。もう一度押すとはずれる。付けた肢はホームの「後で確認」からまとめて回せる。メモのある肢と同じ扱いで、今日の枠では復習のほうから引く'],
  ['v42','2026-10-23','「使う教材」を小さいタブ（直前答練など）に切り替えた瞬間に1周完了とみなされ、周回の記録が丸ごと消えていた不具合を修正。押し間違いでも起きる。周を終えたときに消すのは、いま出題しているプールの肢だけにし、別のタブで進めた記録は残すようにした。あわせて、出題の設定を変えた直後は周を終えたとみなさないようにした。学習記録・正答率・復習の予定日は従来から影響を受けない'],
  ['v41','2026-10-23','今日の学習時間が、上の棒グラフと「今日の◯分」のカードで1分ちがうことがあったのを修正。棒グラフは切り捨て、カードは四捨五入だったため、29分50秒が29分と30分の両方で出ていた。切り捨てにそろえた。「使い切りました」の判定も、分数ではなく、のこり時間で1肢でも出せるかどうかで決めるようにした'],
@@ -842,6 +849,14 @@ function planLists(total,opt){
   return shuf(pick(neu,total)).slice(0,total);
 }
 /* 「後で確認」を付けた肢。教材を入れ替えても、無くなった肢は黙って落とす */
+/* 設定を変えたときの知らせ。いまの中身と肢数を出す */
+function cfgToast(what){
+  _hot=null;
+  var RN2={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'}, pl=pool(S.pool);
+  toast(what+'を変えました → '+((pl&&pl.label)||S.pool)+' / '+
+    (poolRk(S.pool)?'タブ指定':(RN2[S.rank]||S.rank))+' / '+
+    (S.hot?'よく出る論点だけ':'全論点')+'　'+poolTotal()+'肢');
+}
 function flagged(){
   var o=[],k;
   for(k in (S.F||{})) if(S.F[k]&&BYID[k]) o.push(BYID[k]);
@@ -1236,56 +1251,6 @@ function vHome(){
     'ブラウザに保存できていません。記録タブから控えを書き出すか、Safari／Chromeでファイルを直接開いてください。</div>';
   h+=nextHtml();
 
-  if(M.pools.length>1){
-    h+='<div class="lbl" style="margin-top:20px">使う教材</div><div class="seg'+(M.pools.length>3?' wrap':'')+'">';
-    M.pools.forEach(function(pl){
-      h+='<button data-pool="'+pl.id+'" class="'+(S.pool===pl.id?'on':'')+'">'+esc(pl.label)+
-         '<br><span style="font-size:9.5px;opacity:.75">'+esc(pl.sub||(poolCount(pl.id)+'肢'))+'</span></button>';
-    });
-    h+='</div>';
-    var cur=pool(S.pool);
-    if(cur&&cur.note) h+='<div class="note" style="margin-top:-10px">'+esc(cur.note)+'</div>';
-  }
-
-  var fixRk=poolRk(S.pool);
-  if(fixRk){
-    /* このタブは教材の種類ごとにランクが決まっているので、ランクの選択は出さない */
-    var parts=[], KN={0:'問題集',1:'過年度本試験',2:'直前答練'}, RN={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'};
-    (poolKs(S.pool)||[0,1,2]).forEach(function(kk){
-      var n=CARDS.filter(function(c){ return (c.k||0)===kk&&rankMatch(fixRk[String(kk)]||'ABC',c); }).length;
-      if(n) parts.push((KN[kk]||'教材')+'の'+(RN[fixRk[String(kk)]||'ABC'])+' '+n+'肢');
-    });
-    h+='<div class="note" style="margin-top:14px">このタブは出題するランクが決まっています：'+esc(parts.join(' ＋ '))+'。'+
-       'ランクを自分で選びたいときは「短答対策」タブに切り替えてください。</div>';
-  }else{
-  h+='<div class="lbl" style="margin-top:18px">出題するランク</div><div class="seg">';
-  [['A','Ａのみ'],['AB','Ａ＋Ｂ'],['ABC','全部']].forEach(function(r){
-    var n=CARDS.filter(function(c){return poolOk(c)&&(r[0]==='A'?c.r==='Ａ':r[0]==='AB'?c.r!=='Ｃ':true);}).length;
-    h+='<button data-rank="'+r[0]+'" class="'+(S.rank===r[0]?'on':'')+'">'+r[1]+'<br><span style="font-size:9.5px;opacity:.75">'+n+'肢</span></button>'; });
-  h+='</div>';
-  }
-
-  var hotN=CARDS.filter(function(c){ return poolOk(c)&&rankOk(c)&&!!hotSet()[c.t]; }).length;
-  var hotT=0; TOPICS.forEach(function(t){ if(hotSet()[t.c]) hotT++; });
-  h+='<div class="lbl" style="margin-top:18px">出す範囲</div><div class="seg">'+
-     '<button data-hot="0" class="'+(S.hot?'':'on')+'">全'+TOPICS.length+'論点<br><span style="font-size:9.5px;opacity:.75">'+
-       CARDS.filter(function(c){return poolOk(c)&&rankOk(c);}).length+'肢</span></button>'+
-     '<button data-hot="1" class="'+(S.hot?'on':'')+'">よく出る論点だけ<br><span style="font-size:9.5px;opacity:.75">'+
-       hotT+'論点 '+hotN+'肢</span></button></div>';
-  h+='<div class="note" style="margin-top:-10px">'+(S.hot
-    ?'出題実績の重みで上位'+Math.round(HOTSHARE*100)+'%を占める'+hotT+'論点だけを出します。足切りと同じ重みの論点は全部入れています。時間が足りないときはここまで割り切ってください。'
-    :'すべての論点から出します。')+'</div>';
-  var aN=CARDS.filter(function(c){ return poolOk(c)&&c.r==='Ａ'; }).length,
-      allN=CARDS.filter(poolOk).length;
-  if(!fixRk&&allN&&aN/allN>0.7)
-    h+='<div class="note">この科目はほとんどの肢がＡなので、ランクの絞り込みではあまり量が減りません。'+
-       '減らしたいときは上の「よく出る論点だけ」を使ってください。</div>';
-  h+='<div class="lbl" style="margin-top:18px">出題のかたより</div><div class="seg">'+
-     '<button data-mix="freq" class="'+(S.mix==='freq'?'on':'')+'">頻出を厚く</button>'+
-     '<button data-mix="flat" class="'+(S.mix==='flat'?'on':'')+'">均等</button></div>';
-  h+='<div class="note" style="margin-top:-10px">'+esc(S.mix==='freq'
-    ?(M.freqNote||'過去の本試験での出題実績で重みを付けています。')
-    :'すべての肢を同じ確率で出します。')+'</div>';
   var s2=stage2();
   if(s2){
     h+='<div class="alert" style="background:#E3EAF4;border-color:var(--ao);color:var(--ao)">'+
@@ -1297,12 +1262,81 @@ function vHome(){
   }
   h+=paceHtml();
 
-  h+='<div class="lbl" style="margin-top:20px">1周する日数</div><div class="seg">';
+
+  /* 出題の設定は、決めたらふだんは触らないもの。
+     スクロールのたびに指が当たる位置に置いていたため誤操作が多かったので、
+     ふだんは1行にたたんで、「変える」を押したときだけ開く。 */
+  var cfg='';
+  if(M.pools.length>1){
+    cfg+='<div class="lbl" style="margin-top:4px">使う教材</div><div class="seg'+(M.pools.length>3?' wrap':'')+'">';
+    M.pools.forEach(function(pl){
+      cfg+='<button data-pool="'+pl.id+'" class="'+(S.pool===pl.id?'on':'')+'">'+esc(pl.label)+
+         '<br><span style="font-size:9.5px;opacity:.75">'+esc(pl.sub||(poolCount(pl.id)+'肢'))+'</span></button>';
+    });
+    cfg+='</div>';
+    var cur=pool(S.pool);
+    if(cur&&cur.note) cfg+='<div class="note" style="margin-top:-10px">'+esc(cur.note)+'</div>';
+  }
+
+  var fixRk=poolRk(S.pool);
+  if(fixRk){
+    /* このタブは教材の種類ごとにランクが決まっているので、ランクの選択は出さない */
+    var parts=[], KN={0:'問題集',1:'過年度本試験',2:'直前答練'}, RN={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'};
+    (poolKs(S.pool)||[0,1,2]).forEach(function(kk){
+      var n=CARDS.filter(function(c){ return (c.k||0)===kk&&rankMatch(fixRk[String(kk)]||'ABC',c); }).length;
+      if(n) parts.push((KN[kk]||'教材')+'の'+(RN[fixRk[String(kk)]||'ABC'])+' '+n+'肢');
+    });
+    cfg+='<div class="note" style="margin-top:14px">このタブは出題するランクが決まっています：'+esc(parts.join(' ＋ '))+'。'+
+       'ランクを自分で選びたいときは「短答対策」タブに切り替えてください。</div>';
+  }else{
+  cfg+='<div class="lbl" style="margin-top:18px">出題するランク</div><div class="seg">';
+  [['A','Ａのみ'],['AB','Ａ＋Ｂ'],['ABC','全部']].forEach(function(r){
+    var n=CARDS.filter(function(c){return poolOk(c)&&(r[0]==='A'?c.r==='Ａ':r[0]==='AB'?c.r!=='Ｃ':true);}).length;
+    cfg+='<button data-rank="'+r[0]+'" class="'+(S.rank===r[0]?'on':'')+'">'+r[1]+'<br><span style="font-size:9.5px;opacity:.75">'+n+'肢</span></button>'; });
+  cfg+='</div>';
+  }
+
+  var hotN=CARDS.filter(function(c){ return poolOk(c)&&rankOk(c)&&!!hotSet()[c.t]; }).length;
+  var hotT=0; TOPICS.forEach(function(t){ if(hotSet()[t.c]) hotT++; });
+  cfg+='<div class="lbl" style="margin-top:18px">出す範囲</div><div class="seg">'+
+     '<button data-hot="0" class="'+(S.hot?'':'on')+'">全'+TOPICS.length+'論点<br><span style="font-size:9.5px;opacity:.75">'+
+       CARDS.filter(function(c){return poolOk(c)&&rankOk(c);}).length+'肢</span></button>'+
+     '<button data-hot="1" class="'+(S.hot?'on':'')+'">よく出る論点だけ<br><span style="font-size:9.5px;opacity:.75">'+
+       hotT+'論点 '+hotN+'肢</span></button></div>';
+  cfg+='<div class="note" style="margin-top:-10px">'+(S.hot
+    ?'出題実績の重みで上位'+Math.round(HOTSHARE*100)+'%を占める'+hotT+'論点だけを出します。足切りと同じ重みの論点は全部入れています。時間が足りないときはここまで割り切ってください。'
+    :'すべての論点から出します。')+'</div>';
+  var aN=CARDS.filter(function(c){ return poolOk(c)&&c.r==='Ａ'; }).length,
+      allN=CARDS.filter(poolOk).length;
+  if(!fixRk&&allN&&aN/allN>0.7)
+    cfg+='<div class="note">この科目はほとんどの肢がＡなので、ランクの絞り込みではあまり量が減りません。'+
+       '減らしたいときは上の「よく出る論点だけ」を使ってください。</div>';
+  cfg+='<div class="lbl" style="margin-top:18px">出題のかたより</div><div class="seg">'+
+     '<button data-mix="freq" class="'+(S.mix==='freq'?'on':'')+'">頻出を厚く</button>'+
+     '<button data-mix="flat" class="'+(S.mix==='flat'?'on':'')+'">均等</button></div>';
+  cfg+='<div class="note" style="margin-top:-10px">'+esc(S.mix==='freq'
+    ?(M.freqNote||'過去の本試験での出題実績で重みを付けています。')
+    :'すべての肢を同じ確率で出します。')+'</div>';
+  cfg+='<div class="lbl" style="margin-top:20px">1周する日数</div><div class="seg">';
   CYC.forEach(function(n){ var per=Math.ceil(poolTotal()/n);
-    h+='<button data-cyc="'+n+'" class="'+(cyc()===n?'on':'')+'">'+n+'日<br>'+
+    cfg+='<button data-cyc="'+n+'" class="'+(cyc()===n?'on':'')+'">'+n+'日<br>'+
       '<span style="font-size:9.5px;opacity:.75">'+per+'肢<br>約'+mins(Math.round(per*1.3))+'分</span></button>'; });
-  h+='</div><div class="note" style="margin-top:-10px">'+esc(M.cycleNote||
+  cfg+='</div><div class="note" style="margin-top:-10px">'+esc(M.cycleNote||
      '復習の最長間隔もこの日数に合わせるので、必ずこの周期で全部に戻ってきます。')+'</div>';
+
+  var RN2={A:'Ａのみ',AB:'Ａ＋Ｂ',ABC:'全ランク'}, cpl=pool(S.pool);
+  var sm=[((cpl&&cpl.label)||S.pool),
+          (poolRk(S.pool)?'ランクはタブ指定':(RN2[S.rank]||S.rank)),
+          (S.hot?'よく出る論点だけ':'全論点'),
+          (S.mix==='freq'?'頻出を厚く':'均等'),
+          (cyc()+'日で1周')];
+  h+='<div class="lbl" style="margin-top:20px">出題の設定</div>';
+  if(tmp.cfg){
+    h+=cfg+'<div class="mini" style="margin-top:14px"><button data-cfg="0">設定を閉じる</button></div>';
+  }else{
+    h+='<div class="cfgbar"><span>'+esc(sm.join(' ／ '))+'<b>'+poolTotal()+'肢</b></span>'+
+       '<button data-cfg="1">変える</button></div>';
+  }
 
   var rz=resumable();
   if(rz){ h+='<div class="lbl" style="margin-top:20px">途中のセッション</div>';
@@ -2148,12 +2182,14 @@ document.addEventListener('click',function(e){
   if(d.topic){ startSession('topic',d.topic); return; }
   if(d.cz){ startSession('cz',d.cz); return; }
   if(d.psort){ tmp.psort=d.psort; render(); return; }
-  if(d.pool){ S.pool=d.pool; if(d.pool!=='mon') S.s2dis=1; save(); render(); return; }
+  /* 設定を変えたら、何に変わったかを必ず知らせる。
+     押し間違いにその場で気づけるようにするため。 */
+  if(d.pool){ S.pool=d.pool; if(d.pool!=='mon') S.s2dis=1; save(); cfgToast('使う教材'); render(); return; }
   if(d.s2){ S.s2dis=1; save(); toast('問題集に集中します'); render(); return; }
-  if(d.rank){ S.rank=d.rank; save(); render(); return; }
-  if(d.mix){ S.mix=d.mix; save(); render(); return; }
-  if(d.hot!==undefined){ S.hot=+d.hot; save(); render(); return; }
-  if(d.cyc){ setCycle(+d.cyc); save(); render(); return; }
+  if(d.rank){ S.rank=d.rank; save(); cfgToast('ランク'); render(); return; }
+  if(d.mix){ S.mix=d.mix; save(); cfgToast('かたより'); render(); return; }
+  if(d.hot!==undefined){ S.hot=+d.hot; save(); cfgToast('出す範囲'); render(); return; }
+  if(d.cyc){ setCycle(+d.cyc); save(); cfgToast('1周の日数'); render(); return; }
   if(d.rt){ S.rt=d.rt; save(); render(); return; }
   if(d.tts!==undefined){ S.tts=+d.tts; save(); if(!S.tts)stopSpeak(); render(); return; }
   if(d.rate){ S.ttsRate=Math.max(0.6,Math.min(1.8,(S.ttsRate||1.05)+(d.rate==='+'?0.15:-0.15)));
@@ -2263,6 +2299,7 @@ document.addEventListener('click',function(e){
       return;
     }
   }
+  if(d.cfg!==undefined){ tmp.cfg=+d.cfg; render(); return; }
   if(d.flag&&ses&&ses.queue[ses.i]){
     var fid=ses.queue[ses.i].i; S.F=S.F||{};
     if(S.F[fid]){ delete S.F[fid]; toast('はずしました'); } else { S.F[fid]=1; toast('後で確認に入れました'); }
