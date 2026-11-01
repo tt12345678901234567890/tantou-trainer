@@ -214,8 +214,9 @@ textarea{width:100%;min-height:110px;margin-top:9px;padding:10px;border-radius:1
 "use strict";
 var CARDS=[], TOPICS=[], CZ=[], MAXW=1, M={}, SH={};
 var BYID={}, BYTP={}, TP={};
-var APPVER='v45', APPDATE='2026-11-01';
+var APPVER='v46', APPDATE='2026-11-02';
 var CHANGES=[
+ ['v46','2026-11-02','引き継ぎの文字列を、メモ帳などを経由しても読めるようにした。改行や前後の余計な文字を取り除き、TT1: が先頭になくても拾う。読めないときは、実際に貼り付けられた中身の先頭と文字数を知らせるので、どこで崩れたか分かる。あわせて、クリップボードを使わずに済む「ファイルに書き出す」と、受け取る側の「ファイルを選ぶ」を追加'],
  ['v45','2026-11-01','端末間の引き継ぎで「内容を確かめる」を押しても何も起きないことがあったのを修正。貼り付けた文字列を開く処理が、読めない・端末が圧縮に未対応といった場合に同期的に例外を投げていて、受け止める先がなく画面が無反応のまま止まっていた。必ず理由を知らせるようにし、「文字列が途中で切れている」「この端末は圧縮された文字列を開けません」など、次に何をすればよいかが分かる文面にした。あわせて、圧縮を開けない端末向けに「圧縮しないでコピー」を追加（長さは約2倍）'],
  ['v44','2026-10-27','出題の設定（使う教材・ランク・出す範囲・かたより・1周する日数）を、ふだんは1行にたたむようにした。スクロールのたびに指が当たる位置にボタンが並んでいて、押し間違いが起きていたため。たたんだ行にはいまの設定と肢数が出るので、変わっていればその場で気づける。「変える」を押したときだけ開き、ホームを離れると自動で閉じる。設定を変えたときは、何がどう変わったかを必ず知らせるようにした'],
  ['v43','2026-10-25','問題に「後で確認」の印を付けられるようにした。問題文の上のボタンで、問題を解いている最中でも解説を読んでいる最中でも押せる。もう一度押すとはずれる。付けた肢はホームの「後で確認」からまとめて回せる。メモのある肢と同じ扱いで、今日の枠では復習のほうから引く'],
@@ -532,19 +533,41 @@ function packText(obj){
    呼び出し側の .then より先に投げるので、画面が何の反応もしないまま止まっていた。
    必ず Promise を返し、失敗した理由を文章で返す。 */
 function canGunzip(){ try{ return !!(window.DecompressionStream&&window.Response&&window.Blob); }catch(e){ return false; } }
+/* 貼り付けの途中でメモ帳などを経由すると、改行が入ったり前後に余計な文字が付いたりする。
+   空白はすべて取り除き、TT1: は先頭でなくても拾う。 */
+function sniffText(txt){
+  txt=String(txt||'');
+  var i=txt.indexOf('TT1:');
+  if(i>=0){
+    /* base64に使える文字だけ残す。改行・全角空白・メモ帳が足した説明文などを落とす。
+       「=」は末尾の詰め物なので、そこで打ち切る（後ろに文が続いていても切れる）。 */
+    var body=txt.slice(i+4).replace(/[^A-Za-z0-9+/=]/g,'');
+    var m=body.match(/^[A-Za-z0-9+/]*={0,2}/);
+    return {kind:'tt1', body:(m?m[0]:body)};
+  }
+  var j=txt.indexOf('{');
+  if(j>=0) return {kind:'json', body:txt.slice(j)};
+  return {kind:'none', body:txt.trim()};
+}
+function peek(txt){
+  var t=String(txt||'').replace(/[\s\u00a0]/g,' ').trim();
+  return t.length?('「'+t.slice(0,16)+(t.length>16?'…':'')+'」'+t.length+'文字'):'（空）';
+}
 function unpackText(txt){
   try{
-    txt=String(txt||'').trim();
-    if(!txt) return Promise.reject(new Error('文字列が空です。貼り付けられているか確かめてください'));
-    if(txt.indexOf('TT1:')!==0){
-      try{ return Promise.resolve(JSON.parse(txt)); }
-      catch(e){ return Promise.reject(new Error('文字列を読めません。先頭から末尾まで全部コピーできているか確かめてください')); }
+    var sn=sniffText(txt);
+    if(sn.kind==='none')
+      return Promise.reject(new Error('文字列が見つかりません。貼り付けた内容 '+peek(txt)));
+    if(sn.kind==='json'){
+      try{ return Promise.resolve(JSON.parse(sn.body)); }
+      catch(e){ return Promise.reject(new Error('文字列を読めません。貼り付けた内容 '+peek(txt))); }
     }
+    txt='TT1:'+sn.body;
     if(!canGunzip())
       return Promise.reject(new Error('この端末は圧縮された文字列を開けません。コピー元の端末で「圧縮しないでコピー」を使ってください'));
     var raw;
-    try{ raw=atob(txt.slice(4)); }
-    catch(e){ return Promise.reject(new Error('文字列が途中で切れているか、余計な文字が混ざっています')); }
+    try{ raw=atob(sn.body); }
+    catch(e){ return Promise.reject(new Error('文字列が途中で切れているか、余計な文字が混ざっています（'+sn.body.length+'文字）')); }
     var b=new Uint8Array(raw.length);
     for(var i=0;i<raw.length;i++) b[i]=raw.charCodeAt(i);
     var ds=new DecompressionStream('gzip');
@@ -589,6 +612,23 @@ function applyBundle(inc, only){
       var f=fresh(); for(var k in f) if(S[k]===undefined) S[k]=f[k];
       S.ses=null;
     }
+  });
+}
+/* 貼り付け・ファイルの両方から呼ぶ取り込み口 */
+function runImport(raw){
+  if(!String(raw||'').trim()){ toast('文字列が貼り付けられていません'); return; }
+  toast('読んでいます…');
+  unpackText(raw).then(function(o){
+    if(!(o&&o.tt&&o.subjects)){ imp1(raw); return; }
+    return compare(o).then(function(rows){
+      tmp.cmp={inc:o,rows:rows}; tmp.imp=0; render();
+    },function(err){
+      toast('中身を調べられませんでした（'+((err&&err.message)||err)+'）');
+    });
+  },function(err){
+    /* 旧アプリの1科目ぶんかもしれないので、そちらも試してから理由を出す */
+    if(imp1(raw,true)) return;
+    toast((err&&err.message)||'読み込めませんでした');
   });
 }
 function imp1(raw,quiet){
@@ -1839,17 +1879,24 @@ function vDash(){
     h+='<div class="note">この文字列がすべてです。コピーしたら、もう片方の端末で「受け取る」に貼ってください。</div>';
   } else if(tmp.imp){
     h+='<textarea id="im" placeholder="コピーした文字列をここに貼る"></textarea>'+
-       '<div class="mini"><button data-imp="do">内容を確かめる</button><button data-imp="close">やめる</button></div>';
+       '<div class="mini"><button data-imp="do">内容を確かめる</button>'+
+       '<label class="pick" style="display:inline-block;padding:7px 13px;font-size:12px">ファイルを選ぶ'+
+       '<input type="file" id="impf" accept=".json,application/json"></label>'+
+       '<button data-imp="close">やめる</button></div>';
     h+='<div class="note">貼り付けたら、上書きする前に科目ごとの新旧を表示します。'+
        '科目別に作っていた旧アプリのバックアップも、そのまま貼れば取り込めます。</div>';
   } else {
     h+='<div class="mini"><button data-exp="copy2" style="border-color:var(--ao);color:var(--ao)">全科目をコピー</button>'+
        '<button data-imp="open">受け取る</button>'+
        '<button data-exp="open">文字列を表示</button>'+
-       '<button data-exp="plain">圧縮しないでコピー</button></div>';
+       '<button data-exp="plain">圧縮しないでコピー</button>'+
+       '<button data-exp="file" style="border-color:var(--ao);color:var(--ao)">ファイルに書き出す</button></div>';
     h+='<div class="note">4科目の記録をまとめて1つにします。同じApple IDのiPhoneとiPadなら、'+
        'こちらで「全科目をコピー」を押し、向こうで「受け取る」を開いて貼り付けるだけで引き継げます'+
        '（ユニバーサルクリップボード）。古い記録で上書きしそうなときは止めます。</div>';
+    h+='<div class="note"><b>貼り付けがうまくいかないときは「ファイルに書き出す」。</b>'+
+       'メモ帳などを経由すると文字列が加工されて読めなくなることがあります。'+
+       '書き出したファイルをiCloud Driveなどに置き、向こうの端末の「受け取る」→「ファイルを選ぶ」で開けば確実です。</div>';
     h+='<div class="note">受け取る側で「この端末は圧縮された文字列を開けません」と出たときは、'+
        'こちらで「圧縮しないでコピー」を使ってください。長さは約2倍になりますが、'+
        '古い端末でも開けます。'+
@@ -2268,6 +2315,21 @@ document.addEventListener('click',function(e){
       });
       return;
     }
+    if(d.exp==='file'){   /* クリップボードを使わずファイルで渡す */
+      toast('まとめています…');
+      bundle().then(function(o){ return JSON.stringify(o); }).then(function(txt){
+        try{
+          var bl=new Blob([txt],{type:'application/json'});
+          var a=document.createElement('a');
+          a.href=URL.createObjectURL(bl);
+          a.download='tantou-'+stamp().replace(/[^0-9]/g,'').slice(0,12)+'.json';
+          document.body.appendChild(a); a.click();
+          setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
+          toast('書き出しました（'+Math.round(txt.length/1024)+'KB）。ファイルアプリ経由で渡せます');
+        }catch(e){ tmp.expText=txt; tmp.exp=1; render(); toast('保存できないので文字列で出します'); }
+      },function(){ toast('まとめられませんでした'); });
+      return;
+    }
     if(d.exp==='plain'){   /* 受け取る側が圧縮を開けないとき用。約2倍の長さになる */
       toast('まとめています…');
       bundle().then(function(o){ return JSON.stringify(o); }).then(function(txt){
@@ -2286,21 +2348,8 @@ document.addEventListener('click',function(e){
     if(d.imp==='open'){ tmp.imp=1; render(); return; }
     if(d.imp==='close'){ tmp.imp=0; render(); return; }
     if(d.imp==='do'){
-      var ta=document.getElementById('im'), raw=ta?ta.value:'';
-      if(!String(raw).trim()){ toast('文字列が貼り付けられていません'); return; }
-      toast('読んでいます…');
-      unpackText(raw).then(function(o){
-        if(!(o&&o.tt&&o.subjects)){ imp1(raw); return; }
-        return compare(o).then(function(rows){
-          tmp.cmp={inc:o,rows:rows}; tmp.imp=0; render();
-        },function(err){
-          toast('中身を調べられませんでした（'+((err&&err.message)||err)+'）');
-        });
-      },function(err){
-        /* 旧アプリの1科目ぶんかもしれないので、そちらも試してから理由を出す */
-        if(String(raw).trim().indexOf('TT1:')!==0&&imp1(raw,true)) return;
-        toast((err&&err.message)||'読み込めませんでした');
-      });
+      var ta=document.getElementById('im');
+      runImport(ta?ta.value:'');
       return; }
     if(0){ try{ var o=migrateBackup(JSON.parse(document.getElementById('im').value));
       if(!o.L) throw 0;
@@ -2354,6 +2403,12 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('change',function(e){
   if(e.target&&e.target.id==='pick'&&e.target.files&&e.target.files[0]) acceptFile(e.target.files[0]);
+  if(e.target&&e.target.id==='impf'&&e.target.files&&e.target.files[0]){
+    var fr=new FileReader();
+    fr.onload=function(){ runImport(String(fr.result||'')); };
+    fr.onerror=function(){ toast('ファイルを読めませんでした'); };
+    fr.readAsText(e.target.files[0]);
+  }
 });
 document.addEventListener('keydown',function(e){
   if(view!=='card'||!ses) return;
